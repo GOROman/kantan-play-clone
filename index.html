@@ -12,6 +12,8 @@
   .wrap { display:flex; flex-wrap:wrap; gap:24px; justify-content:center; padding:16px; }
   .player { width:600px; max-width:100%; display:grid; gap:10px; align-content:start; }
   .outrow input[type=range] { vertical-align:middle; width:140px; }
+  .drumbtn { font-size:14px; padding:5px 14px; border:2px solid #444; border-radius:16px; background:#fff; cursor:pointer; font-weight:700; }
+  .drumbtn.on { background:var(--pad); border-color:var(--pad); color:#fff; }
   .row { display:grid; gap:10px; }
   .keyrow { grid-template-columns:90px 80px 1fr 80px; align-items:center; }
   .logo { font-weight:900; font-size:18px; line-height:1.1; color:var(--pad); letter-spacing:-1px; }
@@ -82,8 +84,9 @@
       <button class="mod" data-mod="M7">M7</button>
     </div>
     <div class="now"><span id="nowChord">—</span> &nbsp; <span id="nowBpm"></span></div>
-    <div class="outrow"><label>テンポ <input type="range" id="bpmSl" min="40" max="220" value="100"></label> &nbsp; <label>オクターブ <select id="octSel"><option value="-2">-2</option><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option><option value="2">+2</option></select></label></div>
-    <div class="outrow"><label>ストローク <select id="strumSel"></select></label> &nbsp; <label>自動アルペジオ <select id="arpSel"></select></label> &nbsp; <label>ベース <select id="bassSel"></select></label></div>
+    <div class="outrow"><button class="drumbtn" id="drumBtn">ドラム</button> <label><select id="drumPatSel"></select></label> &nbsp; <label>テンポ <input type="range" id="bpmSl" min="40" max="220" value="100"></label> &nbsp; <label>オクターブ <select id="octSel"><option value="-2">-2</option><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option><option value="2">+2</option></select></label></div>
+    <div class="outrow"><label>ストローク <select id="strumSel"></select></label> &nbsp; <label>自動アルペジオ <select id="arpSel"></select></label> &nbsp; <label>自動ベース <select id="bassSel"></select></label></div>
+    <div class="outrow"><label>ベース音色 <select id="bassProgSel"></select></label> &nbsp; <label>手弾きベース <select id="bassStyleSel"></select></label> &nbsp; <label>ベースオクターブ <select id="bassOctSel"><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option></select></label></div>
     <div class="outrow"><label>MIDI 出力 <select id="midiSel"><option value="">内蔵音源 (soundfont)</option></select></label> <span id="midiStatus"></span></div>
     <div class="outrow"><label>MIDI 入力 <select id="midiInSel"><option value="">なし</option></select></label> <span class="small" style="font-size:12px;color:#888">白鍵 C〜B → 1〜7、黒鍵 → ♯ 付き</span></div>
   </div>
@@ -161,6 +164,21 @@ const ARPEGGIOS = {   // 自動演奏用アルペジオの形: a0..a7 → コー
   pedal:  { label: 'ペダル', seq: [0,3,0,4,0,3,0,5] },
   wide:   { label: 'ワイド', seq: [0,4,2,5,1,4,3,5] },
 };
+// ベース音色 (FluidR3_GM の名前 / GM プログラム番号)。MIDI 出力では ch2 にプログラムチェンジ
+const BASS_PROGRAMS = {
+  acoustic: { label: 'Acoustic Bass (33)', sf: 'acoustic_bass', gm: 32 },
+  finger:   { label: 'Finger Bass (34)', sf: 'electric_bass_finger', gm: 33 },
+  pick:     { label: 'Pick Bass (35)', sf: 'electric_bass_pick', gm: 34 },
+  fretless: { label: 'Fretless (36)', sf: 'fretless_bass', gm: 35 },
+  slap1:    { label: 'Slap Bass 1 (37)', sf: 'slap_bass_1', gm: 36 },
+  slap2:    { label: 'Slap Bass 2 (38)', sf: 'slap_bass_2', gm: 37 },
+  synth1:   { label: 'Synth Bass 1 (39)', sf: 'synth_bass_1', gm: 38 },
+  synth2:   { label: 'Synth Bass 2 (40)', sf: 'synth_bass_2', gm: 39 },
+  square:   { label: 'Square Wave (81)', sf: 'lead_1_square', gm: 80 },
+  saw:      { label: 'Saw Wave (82)', sf: 'lead_2_sawtooth', gm: 81 },
+};
+// 手弾き時のベース奏法: コードボタンを押すたびにルートを鳴らす (離すと止まる)
+const BASS_STYLES = { off: { label: 'なし' }, root: { label: 'ルート' }, both: { label: 'ルート+オクターブ' }, alt: { label: 'オクターブ交互' } };
 const BASSES = { long: { label: '全音符' }, root: { label: 'ルート' }, alt: { label: 'ルート/5度' }, walk: { label: 'ウォーキング' }, octave: { label: 'オクターブ' } };
 const INSTRUMENTS = {   // gleitz FluidR3_GM の名前と GM プログラム番号。voicing は本家の Style (Gt / Pf) に対応
   guitar:  { label: 'Ac.Guitar', sf: 'acoustic_guitar_steel', gm: 25, voicing: VOICING.GUITAR },
@@ -195,7 +213,8 @@ const oscInst = (type, peak, filter) => ({ play(m, t, o) {
 const synth = oscInst('triangle', 0.25), bassSynth = oscInst('sawtooth', 0.5, 500);
 
 // ---------- Web MIDI ----------
-const midi = { access: null, out: null, in: null, ch: 0, bassCh: 1, drumCh: 9,
+// チャンネル: コードの 6 弦 → ch1〜6 (弦ごとに 1 音 1ch)、ベース → ch7、ドラム → ch10
+const midi = { access: null, out: null, in: null, chordCh: [0, 1, 2, 3, 4, 5], bassCh: 6, drumCh: 9,
   toMs(t) { return performance.now() + (t - ac.currentTime) * 1000; },   // AudioContext 時刻 → DOMHighResTimeStamp
   vel(g, k) { return Math.max(1, Math.min(127, Math.round((g || 1) * k))); },
   note(ch, m, t, o) {
@@ -205,14 +224,14 @@ const midi = { access: null, out: null, in: null, ch: 0, bassCh: 1, drumCh: 9,
     else out.send([0x80 | ch, m, 0], this.toMs(t + dur));
     return { stop: (w) => { if (done) return; done = true; clearTimeout(timer); if (this.out === out) out.send([0x80 | ch, m, 0], this.toMs(w)); } };
   },
-  play(m, t, o) { return this.note(this.ch, m, t, o); },
+  play(m, t, o) { return this.note(this.chordCh[(o.ch || 0) % 6], m, t, o); },   // o.ch = 弦番号 0..5
   drum(note, t, vel) {
     if (!this.out) return false;
     this.out.send([0x90 | this.drumCh, note, this.vel(vel, 115)], this.toMs(t));
     this.out.send([0x80 | this.drumCh, note, 0], this.toMs(t + 0.1));
     return true;
   },
-  program(gm) { if (this.out) { this.out.send([0xC0 | this.ch, gm]); this.out.send([0xC0 | this.bassCh, 32]); } },
+  program(gm) { if (this.out) { for (const ch of this.chordCh) this.out.send([0xC0 | ch, gm]); this.out.send([0xC0 | this.bassCh, BASS_PROGRAMS[state.bassProg].gm]); } },
   allOff(out = this.out) { if (!out) return; for (let ch = 0; ch < 16; ch++) { out.send([0xB0 | ch, 123, 0]); out.send([0xB0 | ch, 120, 0]); } },   // 全 16ch All Notes Off + All Sound Off
 };
 midi.bassOut = { play(m, t, o) { return midi.note(midi.bassCh, m, t, o); } };
@@ -257,7 +276,7 @@ async function initMidi() {
     savePref('midiOut', sel.value);
     stopHeld(ac.currentTime); midi.allOff();
     midi.out = midi.access.outputs.get(sel.value) || null;
-    if (midi.out) { midi.allOff(); midi.program(INSTRUMENTS[instId].gm); inst = midi; bass = midi.bassOut; st.textContent = 'MIDI ch1 / bass ch2 / drums ch10'; }
+    if (midi.out) { midi.allOff(); midi.program(INSTRUMENTS[instId].gm); inst = midi; bass = midi.bassOut; st.textContent = 'MIDI ch1〜6 (弦ごと) / bass ch7 / drums ch10'; }
     else { st.textContent = ''; loadInstrument(instId); loadBass(); }
   };
   refresh(); restore();
@@ -285,21 +304,22 @@ const jitter = (w) => (Math.random() + Math.random() - 1) * w;          // 三�
 const hVel = (v) => Math.max(0.1, Math.min(1.5, v * (1 + jitter(HUMAN.vel))));
 function strum(chord, t, dir, vel, dur) {
   if (!inst || !chord) return;
-  const notes = dir === 'u' ? [...chord.midi].reverse().slice(0, 4) : chord.midi;
+  const idx = dir === 'u' ? [5, 4, 3, 2] : [0, 1, 2, 3, 4, 5];   // 弾く弦 (chord.midi のインデックス)
   const spread = HUMAN.strum[0] + Math.random() * (HUMAN.strum[1] - HUMAN.strum[0]);
   const t0 = Math.max(ac.currentTime, t + jitter(HUMAN.time)), v = hVel(vel);
-  notes.forEach((m, i) => inst.play(m, t0 + i * spread, { gain: v * (dir === 'u' ? 0.7 : 1) * (1 + jitter(0.08)), duration: dur }));
+  idx.forEach((k, i) => inst.play(chord.midi[k], t0 + i * spread, { gain: v * (dir === 'u' ? 0.7 : 1) * (1 + jitter(0.08)), duration: dur, ch: k }));
 }
 function arp(chord, pos, t, vel, dur) {
   if (!inst || !chord) return;
   const seq = ARPEGGIOS[state.arp].seq, idx = seq[pos % seq.length];
-  inst.play(chord.midi[idx % chord.midi.length], Math.max(ac.currentTime, t + jitter(HUMAN.time)), { gain: hVel(vel), duration: dur });
+  inst.play(chord.midi[idx % 6], Math.max(ac.currentTime, t + jitter(HUMAN.time)), { gain: hVel(vel), duration: dur, ch: idx % 6 });
 }
 // ベース (自動演奏)
 let bass = null;
 async function loadBass() {
   if (midi.out) { bass = midi.bassOut; return; }
-  try { bass = sfInst(await Soundfont.instrument(ac, 'acoustic_bass', { soundfont: 'FluidR3_GM', destination: master })); }
+  const id = state.bassProg;
+  try { const sf = sfInst(await Soundfont.instrument(ac, BASS_PROGRAMS[id].sf, { soundfont: 'FluidR3_GM', destination: master })); if (id === state.bassProg && !midi.out) bass = sf; }
   catch (e) { console.error('bass soundfont load failed, using synth', e); bass = bassSynth; }
 }
 function bassNote(chord, iv, t, vel, dur) {          // iv = ルートからの半音
@@ -344,7 +364,7 @@ const prefs = (() => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) |
 function savePref(k, v) { prefs[k] = v; try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {} }
 
 // ---------- 状態 ----------
-const state = { key: 0, deg: null, shift: 0, mod: null, swap: false, octave: 0, pattern: 'manual', bpm: 100, vel: 1.0, chord: null, arp: 'updown', bass: 'alt', strum: 'folk' };
+const state = { key: 0, deg: null, shift: 0, mod: null, swap: false, octave: 0, pattern: 'manual', bpm: 100, vel: 1.0, chord: null, arp: 'updown', bass: 'alt', strum: 'folk', bassProg: 'acoustic', bassStyle: 'root', bassOct: 0, drums: false, drumPat: 'eight' };
 const voicing = () => INSTRUMENTS[instId].voicing;
 function updateChord() {
   state.chord = state.deg ? buildChord(state.key, state.deg, state.shift, state.mod, state.swap, voicing(), state.octave) : null;
@@ -387,6 +407,9 @@ function setBpm(b) { state.bpm = b; document.getElementById('nowBpm').textConten
 function setArp(id) { state.arp = id; document.getElementById('arpSel').value = id; savePref('arp', id); }
 function setBass(id) { state.bass = id; document.getElementById('bassSel').value = id; savePref('bass', id); }
 function setStrum(id) { state.strum = id; document.getElementById('strumSel').value = id; savePref('strum', id); }
+function setBassProg(id) { state.bassProg = id; document.getElementById('bassProgSel').value = id; savePref('bassProg', id); if (midi.out) midi.program(INSTRUMENTS[instId].gm); else loadBass(); }
+function setBassStyle(id) { state.bassStyle = id; document.getElementById('bassStyleSel').value = id; savePref('bassStyle', id); }
+function setBassOct(o) { state.bassOct = o; document.getElementById('bassOctSel').value = o; savePref('bassOct', o); }
 function setOctave(o) { state.octave = o; document.getElementById('octSel').value = o; updateChord(); savePref('octave', o); }
 
 // ---------- 手弾きアルペジオ (本家 arpeggiator.gd + coroutine_play の移植) ----------
@@ -409,9 +432,16 @@ function arpStroke(released) {           // → 弾く弦 (pitch 1..6、1 が低
   arpNext(released);
   return s;
 }
-const held = new Map();                  // pitch → { h: 音源ハンドル, t: 発音時刻 }
+const held = new Map();                  // pitch → { h: 音源ハンドル, t: 発音時刻 }。ベースは pitch 'b0' / 'b1'
 function stopHeld(when, pitches) {
   for (const [p, v] of held) if (!pitches || pitches.includes(p)) { v.h.stop(Math.max(when, v.t + 0.3)); held.delete(p); }   // 最低 0.3 秒は鳴らす (本家 delay_2)
+}
+let bassAlt = 0;
+function manualBass(chord, t, vel) {     // 手弾きベース: ch2 (内蔵ならベース音色) でルートを鳴らす
+  if (!bass || state.bassStyle === 'off') return;
+  const root = 36 + chord.root + state.bassOct * 12;   // C2 付近
+  const notes = state.bassStyle === 'root' ? [root] : state.bassStyle === 'both' ? [root, root + 12] : [root + 12 * (bassAlt++ % 2)];
+  notes.forEach((m, i) => { const k = 'b' + i; stopHeld(t, [k]); held.set(k, { h: bass.play(m, t, { gain: vel, duration: 3.8, hold: true }), t }); });
 }
 function manualPlay(deg, released, vel) {
   if (arpEng.lastDeg !== deg) { arpEng.lastDeg = deg; arpReset(); }
@@ -421,10 +451,11 @@ function manualPlay(deg, released, vel) {
   const chord = state.chord; if (!inst || !chord || !group.length) return;
   const delay = (voicing() === VOICING.GUITAR && type !== ARP_TYPE.SAME) ? 0.007 : 0.0001;   // 本家 delay_1
   const t0 = ac.currentTime + 0.005;
+  if (!released) manualBass(chord, t0, vel);   // 押すたびにベース (離すと止まる)
   group.forEach((pitch, i) => {
     const t = t0 + i * delay;
     stopHeld(t, [pitch]);                 // 同じ弦を弾き直す時は前の音を止める
-    held.set(pitch, { h: inst.play(chord.midi[pitch - 1], t, { gain: vel, duration: 3.8, hold: true }), t });
+    held.set(pitch, { h: inst.play(chord.midi[pitch - 1], t, { gain: vel, duration: 3.8, hold: true, ch: pitch - 1 }), t });
   });
   flashButtons();
 }
@@ -457,17 +488,20 @@ function renderArps() {
 
 // ---------- シーケンサ (自動演奏、lookahead scheduling) ----------
 let step = 0, nextTime = 0, timer = null, paused = false, barStepDone = -1, kickCount = 0;
-function stepDur() { const p = PATTERNS[state.pattern]; return (60 / state.bpm) / (p.steps.length / p.beats); }
+function curPattern() { const p = PATTERNS[state.pattern]; return p.steps ? p : (state.drums ? PATTERNS[state.drumPat] : p); }   // 手弾き + ドラム ON ならドラムパターンで回す
+function stepDur() { const p = curPattern(); return (60 / state.bpm) / (p.steps.length / p.beats); }
 function tick() {
   while (!paused && nextTime < ac.currentTime + 0.15) {
-    const p = PATTERNS[state.pattern];
+    const p = curPattern(), drumOnly = !PATTERNS[state.pattern].steps;
     if (!p.steps) { nextTime = ac.currentTime + 0.1; break; }
     if (step % p.steps.length === 0 && step !== barStepDone) { barStepDone = step; kickCount = 0; }
     const dr = p.steps[step % p.steps.length], t = nextTime;
     const ev = p.strum ? { ...dr, ...STRUMS[state.strum].steps[step % 16] } : dr;   // ストローク系はコードの D/U を弾き方で置き換える
     const v = state.vel * (ev.acc ? 1 : 0.8);
     if (dr.k) drum('k', t + jitter(0.004), hVel(v));
-    bassStep(step % p.steps.length, p, dr, t, v); if (dr.s) drum('s', t + jitter(0.006), hVel(v)); if (dr.h) drum('h', t + jitter(0.008), hVel(v * 0.9));
+    if (dr.s) drum('s', t + jitter(0.006), hVel(v)); if (dr.h) drum('h', t + jitter(0.008), hVel(v * 0.9));
+    if (drumOnly) { step++; nextTime += stepDur(); continue; }       // ドラムだけ。コードは手弾き
+    bassStep(step % p.steps.length, p, dr, t, v);
     const dur = stepDur() * (ev.a !== undefined ? 4 : 2.5);
     if (ev.d) strum(state.chord, t, 'd', v, dur);
     if (ev.u) strum(state.chord, t, 'u', v, dur);
@@ -476,8 +510,15 @@ function tick() {
     step++; nextTime += stepDur();
   }
 }
-function startSeq() { stopHeld(ac.currentTime); if (timer) return; step = 0; barStepDone = -1; paused = false; nextTime = ac.currentTime + 0.05; timer = setInterval(tick, 25); }
+function startSeq(keepHeld) { if (!keepHeld) stopHeld(ac.currentTime); if (timer) return; step = 0; barStepDone = -1; paused = false; nextTime = ac.currentTime + 0.05; timer = setInterval(tick, 25); }
 function stopSeq() { clearInterval(timer); timer = null; paused = false; stopHeld(ac.currentTime); midi.allOff(); }
+function stopTimer() { clearInterval(timer); timer = null; paused = false; }
+function setDrums(on) {
+  state.drums = on; document.getElementById('drumBtn').classList.toggle('on', on);
+  if (state.pattern !== 'manual') return;            // 自動演奏中はパターン側のドラムが鳴る
+  if (on) startSeq(true); else stopTimer();
+}
+function setDrumPat(id) { state.drumPat = id; document.getElementById('drumPatSel').value = id; savePref('drumPat', id); }
 // 音が鳴る瞬間に現在の度数ボタン (と修飾ボタン) を光らせる。〜 は光らせない (押している間だけ点く)
 const flashTimers = new Map();
 function flashButtons(t = ac.currentTime) {
@@ -502,14 +543,22 @@ for (const [id, v] of Object.entries(STRUMS)) document.getElementById('strumSel'
 document.getElementById('strumSel').onchange = e => setStrum(e.target.value);
 document.getElementById('arpSel').onchange = e => setArp(e.target.value);
 document.getElementById('bassSel').onchange = e => setBass(e.target.value);
+for (const [id, v] of Object.entries(BASS_PROGRAMS)) document.getElementById('bassProgSel').add(new Option(v.label, id));
+for (const [id, v] of Object.entries(BASS_STYLES)) document.getElementById('bassStyleSel').add(new Option(v.label, id));
+document.getElementById('bassProgSel').onchange = e => setBassProg(e.target.value);
+document.getElementById('bassStyleSel').onchange = e => setBassStyle(e.target.value);
+document.getElementById('bassOctSel').onchange = e => setBassOct(+e.target.value);
 document.getElementById('bpmSl').oninput = e => setBpm(+e.target.value);
+for (const [id, p] of Object.entries(PATTERNS)) if (p.steps) document.getElementById('drumPatSel').add(new Option(p.label, id));
+document.getElementById('drumPatSel').onchange = e => setDrumPat(e.target.value);
+document.getElementById('drumBtn').onclick = () => { ac.resume(); setDrums(!state.drums); };
 document.getElementById('octSel').onchange = e => setOctave(+e.target.value);
 const patrow = document.getElementById('patrow');
 for (const [id, p] of Object.entries(PATTERNS)) {
   const el = document.createElement('div'); el.className = 'pat'; el.dataset.pat = id;
   const dots = (p.steps || []).slice(0, 16).map(e => `<i class="${e.d || e.u || e.a !== undefined ? 'on' : ''}"></i>`).join('');
   el.innerHTML = `<div class="dots">${dots}</div>${p.label}`;
-  el.onclick = () => { ac.resume(); setPattern(id); if (id === 'manual') stopSeq(); else startSeq(); };
+  el.onclick = () => { ac.resume(); setPattern(id); if (id === 'manual') { stopSeq(); if (state.drums) startSeq(true); } else startSeq(); };
   patrow.appendChild(el);
 }
 // コードボタン: 押す / 離す の両方でアルペジオが進む (本家と同じ)
@@ -567,6 +616,9 @@ window.addEventListener('blur', () => { pressed.forEach(d => releaseDeg(d)); set
 state.key = prefs.key ?? 0; renderKey(); setPattern('manual');
 setBpm(prefs.bpm ?? 100); setArp(ARPEGGIOS[prefs.arp] ? prefs.arp : 'updown'); setBass(BASSES[prefs.bass] ? prefs.bass : 'alt');
 setStrum(STRUMS[prefs.strum] ? prefs.strum : 'folk'); setOctave(prefs.octave ?? 0);
+state.bassProg = BASS_PROGRAMS[prefs.bassProg] ? prefs.bassProg : 'acoustic'; document.getElementById('bassProgSel').value = state.bassProg;
+setBassStyle(BASS_STYLES[prefs.bassStyle] ? prefs.bassStyle : 'root'); setBassOct(prefs.bassOct ?? 0);
+setDrumPat(PATTERNS[prefs.drumPat] && PATTERNS[prefs.drumPat].steps ? prefs.drumPat : 'eight');
 arpEng.cur = prefs.arpNo ?? 0;
 loadInstrument(INSTRUMENTS[prefs.instrument] ? prefs.instrument : 'guitar'); loadBass(); initMidi();
 </script>
