@@ -27,6 +27,10 @@
   .pat .dots { display:grid; grid-template-columns:repeat(8,6px); gap:2px; }
   .pat .dots i { width:6px; height:6px; background:#ddd; border-radius:1px; }
   .pat .dots i.on { background:var(--pad); }
+  .arprow { grid-template-columns:repeat(5,1fr); }
+  .arp { height:56px; background:#fff; border:3px solid #999; border-radius:4px; cursor:pointer; display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(6,1fr) 1.3fr; gap:2px; padding:4px 6px; }
+  .arp.active { background:#000; border-color:#000; }
+  .arp i { display:block; border-radius:1px; }
   .main { grid-template-columns:1fr 1fr 1fr 130px; grid-template-rows:repeat(3,110px); }
   .deg { background:var(--key); color:#fff; border:none; border-radius:4px; font-size:44px; font-weight:800; position:relative; cursor:pointer; }
   .deg small { position:absolute; left:8px; bottom:6px; font-size:18px; font-weight:600; }
@@ -34,7 +38,7 @@
   .deg.shift.on { background:var(--sel); }
   .deg.hit, .mod.hit { background:#fff; color:var(--pad); box-shadow:0 0 0 4px var(--pad) inset; }
   .pad { grid-row:1 / span 3; grid-column:4; background:var(--pad); border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:44px; color:#fff; cursor:pointer; }
-  .pad.hit { filter:brightness(1.2); }
+  .pad.on { background:var(--sel); color:#222; }
   .modrow { grid-template-columns:repeat(5,1fr); }
   .mod { height:76px; background:var(--btn); border:none; border-radius:4px; font-size:30px; font-weight:700; color:#555; cursor:pointer; }
   .mod.on { background:var(--active); color:#222; }
@@ -57,11 +61,12 @@
       <select class="instsel" id="instSel"></select>
     </div>
     <div class="row patrow" id="patrow"></div>
+    <div class="row arprow" id="arprow"></div>
     <div class="row main" id="main">
       <button class="deg" data-deg="7">7<small></small></button>
       <button class="deg shift" data-shift="-1">♭</button>
       <button class="deg shift" data-shift="1">♯</button>
-      <div class="pad" id="pad">〜</div>
+      <div class="pad" id="pad" title="押している間 メジャー↔マイナー入れ替え">〜</div>
       <button class="deg" data-deg="4">4<small></small></button>
       <button class="deg" data-deg="5">5<small></small></button>
       <button class="deg" data-deg="6">6<small></small></button>
@@ -77,58 +82,56 @@
       <button class="mod" data-mod="M7">M7</button>
     </div>
     <div class="now"><span id="nowChord">—</span> &nbsp; <span id="nowBpm"></span></div>
-    <div class="outrow"><label>テンポ <input type="range" id="bpmSl" min="40" max="220" value="100"></label></div>
-    <div class="outrow"><label>ストローク <select id="strumSel"></select></label> &nbsp; <label>アルペジオ <select id="arpSel"></select></label> &nbsp; <label>ベース <select id="bassSel"></select></label></div>
+    <div class="outrow"><label>テンポ <input type="range" id="bpmSl" min="40" max="220" value="100"></label> &nbsp; <label>オクターブ <select id="octSel"><option value="-2">-2</option><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option><option value="2">+2</option></select></label></div>
+    <div class="outrow"><label>ストローク <select id="strumSel"></select></label> &nbsp; <label>自動アルペジオ <select id="arpSel"></select></label> &nbsp; <label>ベース <select id="bassSel"></select></label></div>
     <div class="outrow"><label>MIDI 出力 <select id="midiSel"><option value="">内蔵音源 (soundfont)</option></select></label> <span id="midiStatus"></span></div>
-    <div class="outrow"><label>MIDI 入力 <select id="midiInSel"><option value="">なし</option></select></label> <span class="small" style="font-size:12px;color:#888">白鍵 C〜B → 1〜7、黒鍵 → ♭/♯ 付き</span></div>
+    <div class="outrow"><label>MIDI 入力 <select id="midiInSel"><option value="">なし</option></select></label> <span class="small" style="font-size:12px;color:#888">白鍵 C〜B → 1〜7、黒鍵 → ♯ 付き</span></div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
 <script>
-// ---------- 音楽理論 ----------
-const NOTE_NAMES = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
-const MAJOR = [0,2,4,5,7,9,11];
-const TRIAD = ['maj','min','min','maj','maj','min','dim'];    // 各度数の三和音
-const RELATIVE_MINOR = t => NOTE_NAMES[(t + 9) % 12] + 'm';
+// ---------- 本家 KANTAN Play (Godot 版 addons/kantan_music + arpeggiator) から取り出したテーブル ----------
+// NOTE_TABLE[voicing][root][modifier][pitch]: voicing 0=CLOSE 1=GUITAR、root 0..11、modifier 0..15、pitch 0..6 (0 はベース、1..6 が 6 弦)
+const NOTE_TABLE = [24,36,43,52,55,60,64,24,36,42,51,54,60,63,24,36,42,51,58,60,63,24,36,43,53,55,60,65,24,36,43,52,57,60,64,24,36,43,52,55,58,64,24,36,43,51,55,58,63,24,36,43,52,55,60,62,24,36,43,52,55,59,64,24,36,44,52,56,60,64,24,36,43,53,55,58,65,24,36,42,51,57,60,63,24,36,43,51,55,60,63,24,36,43,51,57,60,63,24,36,43,51,55,60,62,24,36,43,51,55,59,63,25,37,44,53,56,61,65,25,37,43,52,55,61,64,25,37,43,52,59,61,64,25,37,44,54,56,61,66,25,37,44,53,58,61,65,25,37,44,53,56,59,65,25,37,44,52,56,59,64,25,37,44,53,56,61,63,25,37,44,53,56,60,65,25,37,45,53,57,61,65,25,37,44,54,56,59,66,25,37,43,52,58,61,64,25,37,44,52,56,61,64,25,37,44,52,58,61,64,25,37,44,52,56,61,63,25,37,44,52,56,60,64,26,38,45,54,57,62,66,26,38,44,53,56,62,65,26,38,44,53,60,62,65,26,38,45,50,55,57,62,26,38,45,54,59,62,66,26,38,45,54,57,60,66,26,38,45,53,57,60,65,26,38,45,54,57,62,64,26,38,45,54,57,61,66,26,38,46,54,58,62,66,26,38,43,50,55,57,60,26,38,44,53,59,62,65,26,38,45,53,57,62,65,26,38,45,53,59,62,65,26,38,45,53,57,62,64,26,38,45,53,57,61,65,27,39,46,51,55,58,63,27,39,45,51,54,57,63,27,39,45,49,54,61,63,27,39,46,51,56,58,63,27,39,46,51,55,60,63,27,39,46,51,55,58,61,27,39,46,51,54,58,61,27,39,46,51,55,58,65,27,39,46,51,55,58,62,27,39,47,51,55,59,63,27,39,44,51,56,58,61,27,39,45,48,54,60,63,27,39,46,51,54,58,63,27,39,46,51,54,60,63,27,39,46,51,54,58,65,27,39,46,51,54,58,62,28,40,47,52,56,59,64,28,40,46,52,55,58,64,28,40,46,50,55,62,64,28,40,47,52,57,59,64,28,40,47,52,56,61,64,28,40,47,52,56,59,62,28,40,47,52,55,59,62,28,40,47,52,56,59,66,28,40,47,52,56,59,63,28,40,48,52,56,60,64,28,40,45,52,57,59,62,28,40,46,49,55,61,64,28,40,47,52,55,59,64,28,40,47,52,55,61,64,28,40,47,52,55,59,66,28,40,47,52,55,59,63,29,41,48,53,57,60,65,29,41,47,53,56,59,65,29,41,47,51,56,63,65,29,41,48,53,58,60,65,29,41,48,53,57,62,65,29,41,48,53,57,60,63,29,41,48,53,56,60,63,29,41,45,48,55,60,65,29,41,48,53,57,60,64,29,41,49,53,57,61,65,29,41,46,53,58,60,63,29,41,47,50,56,62,65,29,41,48,53,56,60,65,29,41,48,53,56,62,65,29,41,44,48,55,60,65,29,41,48,53,56,60,64,30,42,49,54,58,61,66,30,42,48,54,57,60,66,30,42,48,54,57,60,64,30,42,49,54,59,61,66,30,42,49,54,58,63,66,30,42,49,54,58,61,64,30,42,49,54,57,61,64,30,42,46,49,56,61,66,30,42,49,54,58,61,65,30,42,50,54,58,62,66,30,42,47,54,59,61,64,30,42,48,54,57,60,63,30,42,49,54,57,61,66,30,42,49,54,57,63,66,30,42,45,49,56,61,66,30,42,49,54,57,61,65,31,43,47,50,55,59,62,31,43,46,49,55,58,61,31,43,49,55,58,61,65,31,43,48,50,55,60,62,31,43,47,50,55,59,64,31,43,47,50,55,59,65,31,43,46,50,55,58,65,31,43,47,50,55,57,62,31,43,47,50,55,59,66,31,43,47,51,55,59,63,31,43,48,55,60,62,65,31,43,49,55,58,61,64,31,43,46,50,55,58,62,31,43,46,50,55,58,64,31,43,46,50,55,57,62,31,43,46,50,55,58,66,32,44,48,51,56,60,63,32,44,47,50,56,59,62,32,44,50,56,59,62,66,32,44,49,51,56,61,63,32,44,48,51,56,60,65,32,44,48,51,54,60,63,32,44,47,51,54,59,63,32,44,48,51,56,58,63,32,44,48,51,55,60,63,32,44,48,52,56,60,64,32,44,49,56,61,63,66,32,44,50,56,59,62,65,32,44,47,51,56,59,63,32,44,47,51,56,59,65,32,44,47,51,56,58,63,32,44,47,51,55,59,63,33,45,49,52,57,61,64,33,45,48,51,57,60,63,33,45,48,51,55,60,63,33,45,50,52,57,62,64,33,45,49,52,57,61,66,33,45,49,52,55,61,64,33,45,48,52,55,60,64,33,45,49,52,57,59,64,33,45,49,52,56,61,64,33,45,49,53,57,61,65,33,45,50,52,55,62,64,33,45,48,51,54,60,63,33,45,48,52,57,60,64,33,45,48,52,57,60,66,33,45,48,52,57,59,64,33,45,48,52,56,60,64,34,46,50,53,58,62,65,34,46,49,52,58,61,64,34,46,49,52,56,61,64,34,46,51,53,58,63,65,34,46,50,53,55,58,62,34,46,50,53,56,62,65,34,46,49,53,56,61,65,34,46,50,53,58,60,65,34,46,50,53,57,62,65,34,46,50,54,58,62,66,34,46,51,53,56,63,65,34,46,49,52,55,61,64,34,46,49,53,58,61,65,34,46,49,53,55,58,61,34,46,49,53,58,60,65,34,46,49,53,57,61,65,35,47,51,54,59,63,66,35,47,50,53,59,62,65,35,47,50,53,57,62,65,35,47,52,54,59,64,66,35,47,51,54,56,59,63,35,47,51,54,57,63,66,35,47,50,54,57,62,66,35,47,51,54,59,61,66,35,47,51,54,58,63,66,35,47,51,55,59,63,67,35,47,52,54,57,64,66,35,47,50,53,56,62,65,35,47,50,54,59,62,66,35,47,50,54,56,59,62,35,47,50,54,59,61,66,35,47,50,54,58,62,66,36,48,48,52,55,60,64,36,48,48,54,57,63,66,36,48,48,51,58,60,66,36,48,48,53,55,60,65,36,48,48,52,55,60,69,36,48,48,52,58,60,64,36,48,48,55,58,63,67,36,48,48,52,55,62,67,36,48,48,52,55,59,64,36,48,48,52,56,60,64,36,48,48,53,58,60,65,36,48,48,54,57,63,66,36,48,48,55,60,63,67,36,48,48,51,57,60,67,36,48,48,51,55,62,67,36,48,48,55,59,63,67,37,49,49,56,61,65,68,37,49,49,55,58,64,67,37,49,49,55,59,64,67,37,49,49,54,61,66,68,37,49,49,53,58,61,68,37,49,49,56,59,65,68,37,49,49,56,59,64,68,37,49,49,53,56,63,65,37,49,49,56,60,65,68,37,49,49,53,61,65,69,37,49,49,54,59,66,68,37,49,49,55,58,64,67,37,49,49,56,61,64,68,37,49,49,52,58,61,68,37,49,52,56,61,63,68,37,49,49,56,60,64,68,38,38,45,50,57,62,66,38,38,47,50,56,59,65,38,38,48,50,56,60,65,38,38,45,50,57,62,67,38,38,45,50,57,59,66,38,38,45,50,57,60,66,38,38,45,50,57,60,65,38,38,45,50,57,62,64,38,38,45,50,57,61,66,38,38,50,54,58,62,66,38,38,45,50,57,60,67,38,38,47,50,56,59,65,38,38,45,50,57,62,65,38,38,45,50,57,59,65,38,38,50,53,60,62,69,38,38,45,50,57,61,65,39,39,51,58,63,67,70,39,39,51,54,57,63,66,39,39,45,51,57,61,66,39,39,51,56,63,68,70,39,39,51,58,63,67,72,39,39,51,58,61,67,70,39,39,51,58,61,66,70,39,39,51,58,63,65,70,39,39,51,58,62,67,70,39,39,51,55,59,63,67,39,39,51,56,61,68,70,39,39,51,57,60,66,69,39,39,51,54,58,63,66,39,39,51,58,63,66,72,39,39,51,54,63,65,70,39,39,51,58,62,66,70,28,40,47,52,56,59,64,28,40,46,52,58,64,67,28,40,46,50,55,62,64,28,40,45,52,57,59,64,28,40,47,52,56,61,64,28,40,47,50,56,59,64,28,40,47,50,55,59,64,28,40,47,52,56,59,66,28,40,47,51,56,59,64,28,40,48,52,56,60,64,28,40,47,52,57,62,64,28,40,46,52,55,61,64,28,40,47,52,55,59,64,28,40,47,52,55,61,64,28,40,47,52,55,59,66,28,40,47,52,55,63,64,29,41,48,53,57,60,65,29,44,47,53,59,65,68,29,41,47,51,56,63,65,29,41,46,53,58,60,65,29,41,48,53,57,62,65,29,41,48,51,57,60,65,29,41,48,51,56,60,65,29,41,48,53,57,60,67,29,41,45,53,57,60,64,29,41,49,53,57,61,65,29,41,48,51,58,60,65,29,41,47,53,56,62,65,29,41,48,53,56,60,65,29,41,48,53,56,62,65,29,41,48,53,56,60,67,29,41,48,52,56,60,64,30,42,49,54,58,61,66,30,42,48,54,57,60,66,30,42,48,52,57,64,66,30,42,47,54,59,61,66,30,42,49,54,58,63,66,30,42,49,52,58,61,66,30,42,49,52,57,61,66,30,42,49,54,58,61,68,30,42,49,54,58,61,65,30,42,50,54,58,62,66,30,42,49,52,59,61,66,30,42,48,54,57,63,66,30,42,49,54,57,61,66,30,42,49,54,57,63,66,30,42,49,54,57,61,68,30,42,49,53,57,61,65,31,43,47,50,55,59,67,31,43,49,55,58,61,67,31,43,49,53,58,65,67,31,43,48,55,60,62,67,31,43,50,55,59,64,67,31,43,47,50,55,59,65,31,43,50,53,58,62,67,31,43,50,55,59,62,69,31,43,47,50,55,59,66,31,43,51,55,59,63,67,31,43,50,53,60,62,67,31,43,49,55,58,64,67,31,43,50,55,58,62,67,31,43,46,50,58,62,64,31,43,50,55,58,62,69,31,43,50,54,58,62,66,32,44,51,56,60,63,68,32,44,50,56,59,62,68,32,44,50,54,59,66,68,32,44,49,56,61,63,68,32,44,51,56,60,65,68,32,44,51,54,60,63,68,32,44,51,54,59,63,68,32,44,51,56,60,63,70,32,44,51,55,60,63,67,32,44,52,56,60,64,68,32,44,51,54,61,63,68,32,44,50,56,59,65,68,32,44,51,56,59,63,68,32,44,47,51,59,63,65,32,44,51,56,59,63,70,32,44,51,55,59,63,67,33,45,45,52,57,61,64,33,45,51,57,60,63,69,33,45,51,55,60,67,69,33,45,45,50,57,62,64,33,45,45,54,57,61,64,33,45,45,52,55,61,64,33,45,45,52,55,60,64,33,45,45,52,59,61,64,33,45,45,52,56,61,64,33,45,45,53,57,61,65,33,45,45,52,55,62,64,33,45,45,51,57,60,66,33,45,45,52,57,60,64,33,45,45,52,57,60,66,33,45,45,52,59,60,64,33,45,45,52,56,60,64,34,46,46,53,58,62,65,34,46,46,52,58,61,64,34,46,46,52,58,61,68,34,46,46,51,58,63,65,34,46,46,53,58,62,67,34,46,46,53,56,62,65,34,46,46,53,56,61,65,34,46,46,53,58,60,65,34,46,46,53,57,62,65,34,46,46,54,58,62,66,34,46,46,53,56,63,65,34,46,46,52,55,61,64,34,46,46,53,58,61,65,34,46,46,53,58,61,67,34,46,46,53,60,61,65,34,46,46,53,57,61,65,35,47,47,54,59,63,66,35,47,47,53,59,62,65,35,47,47,50,57,59,65,35,47,47,52,59,64,66,35,47,47,54,59,63,68,35,47,47,54,57,63,66,35,47,47,54,57,62,66,35,47,47,54,59,61,66,35,47,47,54,58,63,66,35,47,47,51,55,59,67,35,47,47,54,57,64,66,35,47,47,53,56,62,65,35,47,47,54,59,62,66,35,47,47,54,59,62,68,35,47,47,50,59,61,66,35,47,47,54,58,62,66];
+const CHORD_ROOT_TABLE = [0,2,4,5,7,9,11,3,10,1,3,5,6,8,10,0,4,11,2,4,6,7,9,11,1,5,0,3,5,7,8,10,0,2,6,1,4,6,8,9,11,1,3,7,2,5,7,9,10,0,2,4,8,3,6,8,10,11,1,3,5,9,4,7,9,11,0,2,4,6,10,5,8,10,0,1,3,5,7,11,6,9,11,1,2,4,6,8,0,7,10,0,2,3,5,7,9,1,8,11,1,3,4,6,8,10,2,9];   // [key*9 + degree-1] → ルートの音名 (0=C)
+const MINOR_FLAG_TABLE = [0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,0,1,1,0,0];
+const MINOR_MOD_MAP = [12,1,2,3,13,6,5,14,15,9,10,11,0,4,7,8];   // メジャー用 modifier index → マイナー用
+const MODIFIER = { none: 0, dim: 1, sus4: 3, '7': 5, '9': 7, M7: 8 };   // KantanMusic.Modifier
+// アルペジオパターン 10 種 (0〜4 ギター用、5〜9 ピアノ用)。各 7 行: 6 弦 × 8 ステップ (1=弾く) + type 行
+const ARP_TYPE = { BLANK: 0, SAME: 1, UP: 2, DOWN: 3, MUTE: 4 };
+const ARP_TYPE_COLOR = ["#000000ff", "#75fb4cff", "#ff0000ff", "#00aaffff", "#404040ff"];
+const ARP_DOT_COLOR = '#ef8d4aff';
+const TABLE_ARP = [[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[2,0,0,0,0,0,0,0],[1,0,0,0,0,0,1,0],[1,0,0,0,1,0,0,0],[1,0,1,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[2,1,1,1,1,1,1,1],[1,0,0,1,1,1,0,0],[1,0,0,1,1,1,0,0],[1,0,1,1,1,1,0,0],[1,0,1,1,1,1,0,0],[1,0,1,0,1,1,0,0],[1,0,1,0,0,1,0,0],[2,1,2,3,3,2,0,0],[1,0,0,0,0,0,0,0],[0,0,0,0,1,0,0,0],[0,0,1,0,0,0,1,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0],[0,0,1,0,0,0,1,0],[0,1,0,1,0,1,0,1],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,1,0,0,0,0,0,0],[0,0,1,0,1,0,1,0],[0,0,1,0,1,0,1,0],[0,0,1,0,1,0,1,0],[1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0],[0,0,0,0,1,0,1,0],[0,0,1,0,0,0,1,0],[0,0,1,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,1,0],[0,0,0,0,1,0,0,1],[0,0,1,0,0,1,0,0],[0,1,0,1,0,0,0,0],[0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0],[0,0,1,0,0,0,1,0],[0,1,0,1,0,1,0,1],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1]];
 
-// intervals: 修飾ごとの構成音 (半音)
-function chordIntervals(quality, mod) {
-  const third = quality === 'maj' ? 4 : 3;
-  const fifth = quality === 'dim' ? 6 : 7;
-  switch (mod) {
-    case 'dim':  return [0,3,6];
-    case 'sus4': return [0,5,7];
-    case '9':    return [0,third,fifth,14];
-    case '7':    return [0,third,fifth,10];
-    case 'M7':   return [0,third,fifth,11];
-    default:     return [0,third,fifth];
-  }
-}
-function chordName(root, quality, mod) {
-  const n = NOTE_NAMES[root % 12];
+// ---------- 音楽理論 (本家のテーブルで 6 弦のボイシングを引く) ----------
+const NOTE_NAMES = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
+const RELATIVE_MINOR = t => NOTE_NAMES[(t + 9) % 12] + 'm';
+const VOICING = { CLOSE: 0, GUITAR: 1 };
+function chordName(root, minor, mod) {
+  const n = NOTE_NAMES[root % 12], q = minor ? 'm' : '';
   if (mod === 'dim') return n + 'dim';
   if (mod === 'sus4') return n + 'sus4';
-  const q = quality === 'maj' ? '' : (quality === 'dim' ? 'dim' : 'm');
   if (mod === '9') return n + q + 'add9';
   if (mod === '7') return n + q + '7';
-  if (mod === 'M7') return n + (quality === 'maj' ? 'M7' : 'mM7');
+  if (mod === 'M7') return n + (minor ? 'mM7' : 'M7');
   return n + q;
 }
-// 度数 + 半音シフト + 修飾 → { name, midi[] } (ギター風の広いボイシング)
-function buildChord(tonic, deg, shift, mod) {
-  const quality = TRIAD[deg - 1];
-  const root = (tonic + MAJOR[deg - 1] + shift + 12) % 12;
-  const iv = chordIntervals(quality, mod);
-  const base = 48 + root;                            // C3 付近
-  const notes = [base, base + iv[1] + 12, base + iv[2] + 12, base + 12 + 12];
-  if (iv[3] !== undefined) notes.push(base + (iv[3] % 12) + 24);
-  notes.push(base + iv[1] + 24);
-  return { name: chordName(root, quality, mod), midi: notes.sort((a, b) => a - b), root };
+// KantanMusic.get_midi_note_number と同じ手順。key 0..11、deg 1..7、shift -1/0/1、swap = 〜 (メジャー↔マイナー)
+function buildChord(key, deg, shift, mod, swap, voicing, octave) {
+  const idx = key * 9 + (deg - 1);
+  const root = (CHORD_ROOT_TABLE[idx] + shift + 12) % 12;
+  let minor = !!MINOR_FLAG_TABLE[idx];
+  if (shift !== 0) minor = false;          // 半音シフトしたコードはメジャー扱い
+  if (swap) minor = !minor;
+  const m = MODIFIER[mod || 'none'], mi = minor ? MINOR_MOD_MAP[m] : m;
+  const base = voicing * 12 * 16 * 7 + root * 16 * 7 + mi * 7;
+  const midi = [1, 2, 3, 4, 5, 6].map(p => NOTE_TABLE[base + p] + octave * 12);
+  return { name: chordName(root, minor, mod), midi, root, minor };
 }
 
-// ---------- リズムパターン ----------
-// steps: 1 小節を 16 分割 (waltz は 12)。各 step: d=ダウン u=アップ a=アルペジオ(index) / k s h = ドラム
+// ---------- リズムパターン (自動演奏。クローン独自) ----------
+// steps: 1 小節を 16 分割 (waltz は 12)。各 step: D=ダウン U=アップ a(n)=アルペジオ / k s h = ドラム、! = アクセント
 const S = (str) => str.split(' ').map(t => t === '.' ? {} : {
   d: t.includes('D'), u: t.includes('U'), a: /a(\d)/.test(t) ? +t.match(/a(\d)/)[1] : undefined,
   k: t.includes('k'), s: t.includes('s'), h: t.includes('h'), acc: t.includes('!'),
@@ -142,7 +145,6 @@ const PATTERNS = {
   bossa:   { label: 'Bossa', beats: 4, strum: true, steps: S('a0k . h Dh . . Dk . a0k . h Dh . . Dk .') },
   rock:    { label: 'Rock', beats: 4, strum: true, steps: S('D!k D . Dh D!s D . Dh D!k D . Dk D!s D . Dh') },
 };
-// ストロークの弾き方。strum:true のパターンではコードの D/U をこちらで決め、ドラムはパターンのまま
 const STRUMS = {
   quarter: { label: '4分', steps: S('D! . . . D . . . D! . . . D . . .') },
   eighth:  { label: '8分', steps: S('D! . D . D . D . D! . D . D . D .') },
@@ -152,97 +154,103 @@ const STRUMS = {
   offbeat: { label: '裏打ち', steps: S('. . U . . . U . . . U . . . U .') },
   longs:   { label: '2分', steps: S('D! . . . . . . . D . . . . . . .') },
 };
-// アルペジオの形: a0..a7 の位置 → コード構成音のインデックス
-const ARPEGGIOS = {
+const ARPEGGIOS = {   // 自動演奏用アルペジオの形: a0..a7 → コード構成音 (6 弦) のインデックス
   updown: { label: '上下', seq: [0,1,2,3,4,3,2,1] },
   up:     { label: '上昇', seq: [0,1,2,3,4,5,1,2] },
   broken: { label: '分散', seq: [0,2,1,3,2,4,3,5] },
   pedal:  { label: 'ペダル', seq: [0,3,0,4,0,3,0,5] },
   wide:   { label: 'ワイド', seq: [0,4,2,5,1,4,3,5] },
 };
-// ベース奏法
 const BASSES = { long: { label: '全音符' }, root: { label: 'ルート' }, alt: { label: 'ルート/5度' }, walk: { label: 'ウォーキング' }, octave: { label: 'オクターブ' } };
-const INSTRUMENTS = {   // gleitz FluidR3_GM の名前と GM プログラム番号
-  guitar:  { label: 'Ac.Guitar', sf: 'acoustic_guitar_steel', gm: 25 },
-  piano:   { label: 'Piano', sf: 'acoustic_grand_piano', gm: 0 },
-  epiano:  { label: 'E.Piano', sf: 'electric_piano_1', gm: 4 },
-  strings: { label: 'Strings', sf: 'string_ensemble_1', gm: 48 },
-  organ:   { label: 'Organ', sf: 'drawbar_organ', gm: 16 },
-  brass:   { label: 'Brass', sf: 'brass_section', gm: 61 },
+const INSTRUMENTS = {   // gleitz FluidR3_GM の名前と GM プログラム番号。voicing は本家の Style (Gt / Pf) に対応
+  guitar:  { label: 'Ac.Guitar', sf: 'acoustic_guitar_steel', gm: 25, voicing: VOICING.GUITAR },
+  piano:   { label: 'Piano', sf: 'acoustic_grand_piano', gm: 0, voicing: VOICING.CLOSE },
+  epiano:  { label: 'E.Piano', sf: 'electric_piano_1', gm: 4, voicing: VOICING.CLOSE },
+  strings: { label: 'Strings', sf: 'string_ensemble_1', gm: 48, voicing: VOICING.CLOSE },
+  organ:   { label: 'Organ', sf: 'drawbar_organ', gm: 16, voicing: VOICING.CLOSE },
+  brass:   { label: 'Brass', sf: 'brass_section', gm: 61, voicing: VOICING.CLOSE },
 };
 
 // ---------- オーディオ ----------
+// 音源は全部 play(midi, time, {gain, duration}) → { stop(when) } のインターフェースに揃える
 const ac = new (window.AudioContext || window.webkitAudioContext)();
 const unlock = () => { if (ac.state !== 'running') ac.resume(); };
 ['pointerdown','keydown','touchstart','click'].forEach(ev => window.addEventListener(ev, unlock, { capture: true }));
 const master = ac.createGain(); master.gain.value = 1.0; master.connect(ac.destination);
-let inst = null, instLoading = null, instId = 'guitar';
+let inst = null, instId = 'guitar';
+// soundfont-player のラッパ (play の戻り値に stop(when) がある)
+const sfInst = (sf) => ({ play(m, t, o) { const n = sf.play(m, t, { gain: o.gain, duration: o.duration }); return { stop: (w) => { try { n.stop(w); } catch (e) {} } }; } });
 // soundfont が読めない時のフォールバック (単純な減衰オシレータ)
-const synth = { play(m, t, o) {
+const oscInst = (type, peak, filter) => ({ play(m, t, o) {
   const f = 440 * Math.pow(2, (m - 69) / 12), g = ac.createGain(), osc = ac.createOscillator();
-  osc.type = 'triangle'; osc.frequency.value = f; osc.connect(g); g.connect(master);
-  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((o.gain || 1) * 0.25, t + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + (o.duration || 1)); osc.start(t); osc.stop(t + (o.duration || 1) + 0.05);
-} };
-// ---------- Web MIDI 出力 ----------
-// inst と同じ play(midi, time, {gain, duration}) インターフェースで、PC 上の MIDI 音源へ送る
+  osc.type = type; osc.frequency.value = f;
+  if (filter) { const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = filter; osc.connect(lp); lp.connect(g); } else osc.connect(g);
+  g.connect(master);
+  const end = t + (o.duration || 1);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((o.gain || 1) * peak, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, end); osc.start(t); osc.stop(end + 0.05);
+  return { stop(w) { g.gain.cancelScheduledValues(w); g.gain.setValueAtTime(g.gain.value, w); g.gain.exponentialRampToValueAtTime(0.0001, w + 0.03); osc.stop(w + 0.05); } };
+} });
+const synth = oscInst('triangle', 0.25), bassSynth = oscInst('sawtooth', 0.5, 500);
+
+// ---------- Web MIDI ----------
 const midi = { access: null, out: null, in: null, ch: 0, bassCh: 1, drumCh: 9,
   toMs(t) { return performance.now() + (t - ac.currentTime) * 1000; },   // AudioContext 時刻 → DOMHighResTimeStamp
-  play(m, t, o) {
-    const v = Math.max(1, Math.min(127, Math.round((o.gain || 1) * 105)));
-    this.out.send([0x90 | this.ch, m, v], this.toMs(t));
-    this.out.send([0x80 | this.ch, m, 0], this.toMs(t + (o.duration || 1)));
+  vel(g, k) { return Math.max(1, Math.min(127, Math.round((g || 1) * k))); },
+  note(ch, m, t, o) {
+    const out = this.out; out.send([0x90 | ch, m, this.vel(o.gain, 105)], this.toMs(t));
+    const dur = o.duration || 1; let timer = null, done = false;
+    if (o.hold) timer = setTimeout(() => { if (!done && this.out === out) out.send([0x80 | ch, m, 0]); }, (t - ac.currentTime + dur) * 1000);   // 押しっぱなし用: stop() で先に切れる
+    else out.send([0x80 | ch, m, 0], this.toMs(t + dur));
+    return { stop: (w) => { if (done) return; done = true; clearTimeout(timer); if (this.out === out) out.send([0x80 | ch, m, 0], this.toMs(w)); } };
   },
+  play(m, t, o) { return this.note(this.ch, m, t, o); },
   drum(note, t, vel) {
     if (!this.out) return false;
-    this.out.send([0x90 | this.drumCh, note, Math.max(1, Math.min(127, Math.round(vel * 115)))], this.toMs(t));
+    this.out.send([0x90 | this.drumCh, note, this.vel(vel, 115)], this.toMs(t));
     this.out.send([0x80 | this.drumCh, note, 0], this.toMs(t + 0.1));
     return true;
   },
   program(gm) { if (this.out) { this.out.send([0xC0 | this.ch, gm]); this.out.send([0xC0 | this.bassCh, 32]); } },
-  allOff() { if (this.out) { this.out.send([0xB0 | this.ch, 123, 0]); this.out.send([0xB0 | this.bassCh, 123, 0]); } },
+  allOff(out = this.out) { if (!out) return; for (let ch = 0; ch < 16; ch++) { out.send([0xB0 | ch, 123, 0]); out.send([0xB0 | ch, 120, 0]); } },   // 全 16ch All Notes Off + All Sound Off
 };
-midi.bassOut = { play(m, t, o) {
-  const v = Math.max(1, Math.min(127, Math.round((o.gain || 1) * 105)));
-  midi.out.send([0x90 | midi.bassCh, m, v], midi.toMs(t));
-  midi.out.send([0x80 | midi.bassCh, m, 0], midi.toMs(t + (o.duration || 1)));
-} };
-// MIDI 入力: 白鍵 C D E F G A B → 度数 1〜7、黒鍵 → 下の白鍵に ♯。ベロシティで強弱
+midi.bassOut = { play(m, t, o) { return midi.note(midi.bassCh, m, t, o); } };
+// MIDI 入力: 白鍵 C D E F G A B → 度数 1〜7、黒鍵 → 下の白鍵に ♯。押す/離すでアルペジオが進む。ベロシティで強弱
 const PC_TO_DEG = { 0: [1, 0], 1: [1, 1], 2: [2, 0], 3: [2, 1], 4: [3, 0], 5: [4, 0], 6: [4, 1], 7: [5, 0], 8: [5, 1], 9: [6, 0], 10: [6, 1], 11: [7, 0] };
+const midiHeld = new Map();
 function onMidiIn(e) {
   const [st, note, vel] = e.data, cmd = st & 0xf0;
   if (cmd === 0x90 && vel > 0) {
     const [deg, shift] = PC_TO_DEG[note % 12];
-    ac.resume(); setShift(shift); setDeg(deg);
-    if (state.pattern === 'manual') strum(state.chord, ac.currentTime, 'd', vel / 100, 2);
-    flashPad(ac.currentTime);
+    ac.resume(); setShift(shift); midiHeld.set(note, deg); pressDeg(deg, vel / 100);
+  } else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) {
+    const deg = midiHeld.get(note); midiHeld.delete(note);
+    if (deg) releaseDeg(deg);
   }
 }
 async function initMidi() {
-  const sel = document.getElementById('midiSel'), st = document.getElementById('midiStatus');
+  const sel = document.getElementById('midiSel'), st = document.getElementById('midiStatus'), inSel = document.getElementById('midiInSel');
   if (!navigator.requestMIDIAccess) { st.textContent = '(このブラウザは Web MIDI 非対応)'; return; }
   try { midi.access = await navigator.requestMIDIAccess(); } catch (e) { st.textContent = '(MIDI アクセス拒否)'; return; }
+  for (const o of midi.access.outputs.values()) midi.allOff(o);     // 起動時: 全出力の全チャンネルをノートオフ (前回の鳴りっぱなし対策)
   const refresh = () => {
     const cur = sel.value; sel.length = 1;
     for (const o of midi.access.outputs.values()) sel.add(new Option(o.name, o.id));
     sel.value = [...sel.options].some(x => x.value === cur) ? cur : '';
-  };
-  const inSel = document.getElementById('midiInSel');
-  const refreshIn = () => {
-    const cur = inSel.value; inSel.length = 1;
+    const curIn = inSel.value; inSel.length = 1;
     for (const i of midi.access.inputs.values()) inSel.add(new Option(i.name, i.id));
-    inSel.value = [...inSel.options].some(x => x.value === cur) ? cur : '';
+    inSel.value = [...inSel.options].some(x => x.value === curIn) ? curIn : '';
   };
-  refresh(); refreshIn(); midi.access.onstatechange = () => { refresh(); refreshIn(); };
+  refresh(); midi.access.onstatechange = refresh;
   inSel.onchange = () => {
     if (midi.in) midi.in.onmidimessage = null;
     midi.in = midi.access.inputs.get(inSel.value) || null;
     if (midi.in) midi.in.onmidimessage = onMidiIn;
   };
   sel.onchange = () => {
-    midi.allOff();
+    stopHeld(ac.currentTime); midi.allOff();
     midi.out = midi.access.outputs.get(sel.value) || null;
-    if (midi.out) { midi.program(INSTRUMENTS[instId].gm); inst = midi; bass = midi.bassOut; st.textContent = 'MIDI ch1 / bass ch2 / drums ch10'; }
+    if (midi.out) { midi.allOff(); midi.program(INSTRUMENTS[instId].gm); inst = midi; bass = midi.bassOut; st.textContent = 'MIDI ch1 / bass ch2 / drums ch10'; }
     else { st.textContent = ''; loadInstrument(instId); loadBass(); }
   };
 }
@@ -251,18 +259,19 @@ async function loadInstrument(id) {
   const nameEl = document.getElementById('instName');
   nameEl.textContent = INSTRUMENTS[id].label + ' …';
   document.getElementById('instSel').value = id;
+  setArpSet(INSTRUMENTS[id].voicing);      // 本家: Gt スタイルはアルペジオ 1〜5、Pf スタイルは 6〜10
+  updateChord();
   if (midi.out) { midi.program(INSTRUMENTS[id].gm); inst = midi; nameEl.textContent = INSTRUMENTS[id].label; return; }
   try {
     if (typeof Soundfont === 'undefined') throw new Error('soundfont-player not loaded');
-    instLoading = Soundfont.instrument(ac, INSTRUMENTS[id].sf, { soundfont: 'FluidR3_GM', destination: master });
-    inst = await instLoading;
+    inst = sfInst(await Soundfont.instrument(ac, INSTRUMENTS[id].sf, { soundfont: 'FluidR3_GM', destination: master }));
     nameEl.textContent = INSTRUMENTS[id].label;
   } catch (e) {
     console.error('soundfont load failed, using synth', e);
     inst = synth; nameEl.textContent = INSTRUMENTS[id].label + ' (synth)';
   }
 }
-// 人間が弾いている風のゆらぎ: 発音タイミング・強さ・ストロークの速さを毎回少しばらつかせる
+// 人間が弾いている風のゆらぎ: 発音タイミング・強さ・ストロークの速さを毎回少しばらつかせる (自動演奏用)
 const HUMAN = { time: 0.014, vel: 0.15, strum: [0.008, 0.022] };
 const jitter = (w) => (Math.random() + Math.random() - 1) * w;          // 三角分布 (中央寄り)
 const hVel = (v) => Math.max(0.1, Math.min(1.5, v * (1 + jitter(HUMAN.vel))));
@@ -278,17 +287,11 @@ function arp(chord, pos, t, vel, dur) {
   const seq = ARPEGGIOS[state.arp].seq, idx = seq[pos % seq.length];
   inst.play(chord.midi[idx % chord.midi.length], Math.max(ac.currentTime, t + jitter(HUMAN.time)), { gain: hVel(vel), duration: dur });
 }
-// ベース: キックに合わせてルート → 5 度を交互に弾く
+// ベース (自動演奏)
 let bass = null;
-const bassSynth = { play(m, t, o) {
-  const f = 440 * Math.pow(2, (m - 69) / 12), g = ac.createGain(), osc = ac.createOscillator(), lp = ac.createBiquadFilter();
-  osc.type = 'sawtooth'; osc.frequency.value = f; lp.type = 'lowpass'; lp.frequency.value = 500; osc.connect(lp); lp.connect(g); g.connect(master);
-  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((o.gain || 1) * 0.5, t + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + (o.duration || 1)); osc.start(t); osc.stop(t + (o.duration || 1) + 0.05);
-} };
 async function loadBass() {
   if (midi.out) { bass = midi.bassOut; return; }
-  try { bass = await Soundfont.instrument(ac, 'acoustic_bass', { soundfont: 'FluidR3_GM', destination: master }); }
+  try { bass = sfInst(await Soundfont.instrument(ac, 'acoustic_bass', { soundfont: 'FluidR3_GM', destination: master })); }
   catch (e) { console.error('bass soundfont load failed, using synth', e); bass = bassSynth; }
 }
 function bassNote(chord, iv, t, vel, dur) {          // iv = ルートからの半音
@@ -297,11 +300,10 @@ function bassNote(chord, iv, t, vel, dur) {          // iv = ルートからの�
   while (m > 47) m -= 12;
   bass.play(m, Math.max(ac.currentTime, t + jitter(0.006)), { gain: hVel(vel), duration: dur });
 }
-// 奏法ごとのベースのスケジュール。s = 小節内 step、ev = その step のイベント
 function bassStep(s, p, ev, t, v) {
   const chord = state.chord; if (!chord) return;
   const perBeat = p.steps.length / p.beats, sd = stepDur();
-  const third = chord.midi[1] - chord.midi[0] - 12 <= 3 ? 3 : 4;   // マイナーなら短 3 度
+  const third = chord.minor ? 3 : 4;
   switch (state.bass) {
     case 'long':   if (s === 0) bassNote(chord, 0, t, v, sd * p.steps.length); break;
     case 'root':   if (ev.k) bassNote(chord, 0, t, v, sd * 4); break;
@@ -329,18 +331,19 @@ function drum(kind, t, vel) {
 }
 
 // ---------- 状態 ----------
-const state = { tonic: 0, deg: null, shift: 0, mod: null, pattern: 'manual', bpm: 100, vel: 1.0, chord: null, arp: 'updown', bass: 'alt', strum: 'folk' };
+const state = { key: 0, deg: null, shift: 0, mod: null, swap: false, octave: 0, pattern: 'manual', bpm: 100, vel: 1.0, chord: null, arp: 'updown', bass: 'alt', strum: 'folk' };
+const voicing = () => INSTRUMENTS[instId].voicing;
 function updateChord() {
-  state.chord = state.deg ? buildChord(state.tonic, state.deg, state.shift, state.mod) : null;
+  state.chord = state.deg ? buildChord(state.key, state.deg, state.shift, state.mod, state.swap, voicing(), state.octave) : null;
   document.getElementById('nowChord').innerHTML = state.chord ? `<b>${state.chord.name}</b>` : '—';
 }
 function renderKey() {
-  document.getElementById('keyName').textContent = NOTE_NAMES[state.tonic] + '/' + RELATIVE_MINOR(state.tonic);
-  document.querySelectorAll('.deg[data-deg]').forEach(b => {
-    const c = buildChord(state.tonic, +b.dataset.deg, 0, null);
-    b.querySelector('small').textContent = c.name;
+  document.getElementById('keyName').textContent = NOTE_NAMES[state.key] + '/' + RELATIVE_MINOR(state.key);
+  document.querySelectorAll('.deg[data-deg]').forEach(b => {   // 本家 _set_button_name: 〜 を押している間は m を付け外し
+    b.querySelector('small').textContent = buildChord(state.key, +b.dataset.deg, 0, null, state.swap, 0, 0).name;
   });
 }
+function setKey(k) { state.key = (k + 12) % 12; arpReset(); renderKey(); updateChord(); }
 function setPattern(id) {
   state.pattern = id;
   document.querySelectorAll('.pat').forEach(p => p.classList.toggle('active', p.dataset.pat === id));
@@ -351,9 +354,16 @@ function setMod(mod) {
   updateChord();
 }
 function setShift(s) {
+  if (state.shift !== s) arpReset();
   state.shift = s;
   document.querySelectorAll('.deg.shift').forEach(b => b.classList.toggle('on', +b.dataset.shift === s));
   updateChord();
+}
+function setSwap(on) {
+  if (state.swap === on) return;
+  state.swap = on; arpReset();
+  document.getElementById('pad').classList.toggle('on', on);
+  renderKey(); updateChord();
 }
 function setDeg(d) {
   state.deg = d;
@@ -364,18 +374,82 @@ function setBpm(b) { state.bpm = b; document.getElementById('nowBpm').textConten
 function setArp(id) { state.arp = id; document.getElementById('arpSel').value = id; }
 function setBass(id) { state.bass = id; document.getElementById('bassSel').value = id; }
 function setStrum(id) { state.strum = id; document.getElementById('strumSel').value = id; }
+function setOctave(o) { state.octave = o; document.getElementById('octSel').value = o; updateChord(); }
 
-// ---------- シーケンサ (lookahead scheduling) ----------
-let step = 0, nextTime = 0, timer = null, onBar = null, paused = false, barStepDone = -1, kickCount = 0;
+// ---------- 手弾きアルペジオ (本家 arpeggiator.gd + coroutine_play の移植) ----------
+// パターンは 6 弦 × 8 ステップ。コードボタンを「押す」「離す」たびに 1 ステップ進み、その列で印の付いた弦を弾く
+// type 行: BLANK=何もしない(離した時ここに来たら先頭へ戻る) / SAME=同時 / UP=低い弦から / DOWN=高い弦から / MUTE=消音
+const arpEng = { set: 0, cur: 0, step: 0, lastDeg: -1 };
+const arpPattern = (i) => ({ rows: TABLE_ARP.slice(i * 7, i * 7 + 6), types: TABLE_ARP[i * 7 + 6] });
+function arpReset() { arpEng.step = 0; }
+function arpNext(released) {
+  const p = arpPattern(arpEng.cur);
+  arpEng.step++; if (arpEng.step >= 8) arpEng.step = 0;
+  if (p.types[arpEng.step] === ARP_TYPE.BLANK && released) arpEng.step = 0;
+}
+function arpStroke(released) {           // → 弾く弦 (pitch 1..6、1 が低い弦)
+  const p = arpPattern(arpEng.cur);
+  if (released && arpEng.step === 0) return [];
+  const s = [];
+  for (let str = 0; str < 6; str++) if (p.rows[str][arpEng.step]) s.push(6 - str);
+  if (p.types[arpEng.step] === ARP_TYPE.UP) s.reverse();
+  arpNext(released);
+  return s;
+}
+const held = new Map();                  // pitch → { h: 音源ハンドル, t: 発音時刻 }
+function stopHeld(when, pitches) {
+  for (const [p, v] of held) if (!pitches || pitches.includes(p)) { v.h.stop(Math.max(when, v.t + 0.3)); held.delete(p); }   // 最低 0.3 秒は鳴らす (本家 delay_2)
+}
+function manualPlay(deg, released, vel) {
+  if (arpEng.lastDeg !== deg) { arpEng.lastDeg = deg; arpReset(); }
+  const p = arpPattern(arpEng.cur), type = p.types[arpEng.step];
+  const group = arpStroke(released);
+  if (type === ARP_TYPE.MUTE) { stopHeld(ac.currentTime); return; }
+  const chord = state.chord; if (!inst || !chord || !group.length) return;
+  const delay = (voicing() === VOICING.GUITAR && type !== ARP_TYPE.SAME) ? 0.007 : 0.0001;   // 本家 delay_1
+  const t0 = ac.currentTime + 0.005;
+  group.forEach((pitch, i) => {
+    const t = t0 + i * delay;
+    stopHeld(t, [pitch]);                 // 同じ弦を弾き直す時は前の音を止める
+    held.set(pitch, { h: inst.play(chord.midi[pitch - 1], t, { gain: vel, duration: 3.8, hold: true }), t });
+  });
+  flashButtons();
+}
+const pressed = new Set();
+function pressDeg(deg, vel = state.vel) {
+  if (pressed.has(deg)) return; pressed.add(deg);
+  ac.resume(); setDeg(deg);
+  if (state.pattern === 'manual') manualPlay(deg, false, vel);
+}
+function releaseDeg(deg) {
+  if (!pressed.delete(deg)) return;
+  if (state.pattern === 'manual') { manualPlay(deg, true, state.vel); stopHeld(ac.currentTime); }   // 離したらノートオフ
+}
+// アルペジオ選択 (本家 F1〜F5)。ギター系は 0〜4、ピアノ系は 5〜9
+function setArpSet(v) { arpEng.set = v === VOICING.GUITAR ? 0 : 5; arpEng.cur = arpEng.set + (arpEng.cur % 5); arpReset(); renderArps(); }
+function changeArp(no) { arpEng.cur = arpEng.set + no; arpReset(); renderArps(); }
+function renderArps() {
+  const row = document.getElementById('arprow'); row.innerHTML = '';
+  for (let n = 0; n < 5; n++) {
+    const i = arpEng.set + n, p = arpPattern(i), el = document.createElement('div');
+    el.className = 'arp' + (i === arpEng.cur ? ' active' : ''); el.title = `アルペジオ ${n + 1} (F${n + 1})`;
+    let h = '';
+    for (let str = 0; str < 6; str++) for (let s = 0; s < 8; s++) h += `<i style="background:${p.rows[str][s] && p.types[s] ? ARP_DOT_COLOR : 'transparent'}"></i>`;
+    for (let s = 0; s < 8; s++) h += `<i style="background:${p.types[s] ? ARP_TYPE_COLOR[p.types[s]] : 'transparent'}"></i>`;
+    el.innerHTML = h;
+    el.onpointerdown = () => { ac.resume(); changeArp(n); };
+    row.appendChild(el);
+  }
+}
+
+// ---------- シーケンサ (自動演奏、lookahead scheduling) ----------
+let step = 0, nextTime = 0, timer = null, paused = false, barStepDone = -1, kickCount = 0;
 function stepDur() { const p = PATTERNS[state.pattern]; return (60 / state.bpm) / (p.steps.length / p.beats); }
 function tick() {
   while (!paused && nextTime < ac.currentTime + 0.15) {
     const p = PATTERNS[state.pattern];
     if (!p.steps) { nextTime = ac.currentTime + 0.1; break; }
-    if (step % p.steps.length === 0 && step !== barStepDone) {          // 小節頭 (再開後に同じ小節頭で 2 回呼ばない)
-      barStepDone = step; kickCount = 0;
-      if (onBar && onBar(nextTime)) { paused = true; break; }            // true を返したら止めて待つ
-    }
+    if (step % p.steps.length === 0 && step !== barStepDone) { barStepDone = step; kickCount = 0; }
     const dr = p.steps[step % p.steps.length], t = nextTime;
     const ev = p.strum ? { ...dr, ...STRUMS[state.strum].steps[step % 16] } : dr;   // ストローク系はコードの D/U を弾き方で置き換える
     const v = state.vel * (ev.acc ? 1 : 0.8);
@@ -385,17 +459,16 @@ function tick() {
     if (ev.d) strum(state.chord, t, 'd', v, dur);
     if (ev.u) strum(state.chord, t, 'u', v, dur);
     if (ev.a !== undefined) arp(state.chord, ev.a, t, v, dur);
-    if (state.chord && (ev.d || ev.u || ev.a !== undefined)) flashPad(t);
+    if (state.chord && (ev.d || ev.u || ev.a !== undefined)) flashButtons(t);
     step++; nextTime += stepDur();
   }
 }
-function startSeq() { if (timer) return; step = 0; barStepDone = -1; paused = false; nextTime = ac.currentTime + 0.05; timer = setInterval(tick, 25); }
-function resumeSeq() { if (!paused) return; paused = false; nextTime = ac.currentTime + 0.03; }   // 待っていた小節頭から再開
-function stopSeq() { clearInterval(timer); timer = null; onBar = null; paused = false; midi.allOff(); }
-// 音が鳴る瞬間にパッドと現在の度数ボタン (と修飾ボタン) を光らせる
+function startSeq() { stopHeld(ac.currentTime); if (timer) return; step = 0; barStepDone = -1; paused = false; nextTime = ac.currentTime + 0.05; timer = setInterval(tick, 25); }
+function stopSeq() { clearInterval(timer); timer = null; paused = false; stopHeld(ac.currentTime); midi.allOff(); }
+// 音が鳴る瞬間に現在の度数ボタン (と修飾ボタン) を光らせる。〜 は光らせない (押している間だけ点く)
 const flashTimers = new Map();
-function flashPad(t) {
-  const els = [document.getElementById('pad'), document.querySelector('.deg[data-deg].on'), document.querySelector('.mod.on')].filter(Boolean);
+function flashButtons(t = ac.currentTime) {
+  const els = [document.querySelector('.deg[data-deg].on'), document.querySelector('.mod.on')].filter(Boolean);
   setTimeout(() => els.forEach(el => {
     el.classList.add('hit'); clearTimeout(flashTimers.get(el));
     flashTimers.set(el, setTimeout(() => el.classList.remove('hit'), 90));
@@ -403,8 +476,8 @@ function flashPad(t) {
 }
 
 // ---------- UI ----------
-document.getElementById('keyDown').onclick = () => { state.tonic = (state.tonic + 11) % 12; renderKey(); updateChord(); };
-document.getElementById('keyUp').onclick = () => { state.tonic = (state.tonic + 1) % 12; renderKey(); updateChord(); };
+document.getElementById('keyDown').onclick = () => setKey(state.key - 1);
+document.getElementById('keyUp').onclick = () => setKey(state.key + 1);
 const sel = document.getElementById('instSel');
 for (const [id, v] of Object.entries(INSTRUMENTS)) sel.add(new Option(v.label, id));
 sel.onchange = () => loadInstrument(sel.value);
@@ -417,6 +490,7 @@ document.getElementById('strumSel').onchange = e => setStrum(e.target.value);
 document.getElementById('arpSel').onchange = e => setArp(e.target.value);
 document.getElementById('bassSel').onchange = e => setBass(e.target.value);
 document.getElementById('bpmSl').oninput = e => setBpm(+e.target.value);
+document.getElementById('octSel').onchange = e => setOctave(+e.target.value);
 const patrow = document.getElementById('patrow');
 for (const [id, p] of Object.entries(PATTERNS)) {
   const el = document.createElement('div'); el.className = 'pat'; el.dataset.pat = id;
@@ -425,48 +499,58 @@ for (const [id, p] of Object.entries(PATTERNS)) {
   el.onclick = () => { ac.resume(); setPattern(id); if (id === 'manual') stopSeq(); else startSeq(); };
   patrow.appendChild(el);
 }
+// コードボタン: 押す / 離す の両方でアルペジオが進む (本家と同じ)
 document.querySelectorAll('.deg[data-deg]').forEach(b => {
-  b.addEventListener('pointerdown', () => {
-    ac.resume(); setDeg(+b.dataset.deg);
-    if (state.pattern === 'manual') strum(state.chord, ac.currentTime, 'd', state.vel, 2);
-  });
+  const d = +b.dataset.deg;
+  b.addEventListener('pointerdown', e => { b.setPointerCapture(e.pointerId); pressDeg(d); });
+  ['pointerup', 'pointercancel'].forEach(ev => b.addEventListener(ev, () => releaseDeg(d)));
 });
+// ♭ / ♯ / 修飾: 画面のボタンはトグル (マウスでも使えるように)。キーボードは本家と同じく押している間だけ
 document.querySelectorAll('.deg.shift').forEach(b => b.addEventListener('pointerdown', () => setShift(state.shift === +b.dataset.shift ? 0 : +b.dataset.shift)));
 document.querySelectorAll('.mod').forEach(b => b.addEventListener('pointerdown', () => setMod(state.mod === b.dataset.mod ? null : b.dataset.mod)));
+// 〜 = 押している間メジャー↔マイナー入れ替え (本家の Swap)
 const pad = document.getElementById('pad');
-let padY = null;
-pad.addEventListener('pointerdown', e => { ac.resume(); padY = e.clientY; strum(state.chord, ac.currentTime, 'd', state.vel, 2); flashPad(ac.currentTime); });
-pad.addEventListener('pointermove', e => {                  // 上下になぞるとダウン/アップストローク
-  if (padY === null) return;
-  const dy = e.clientY - padY;
-  if (Math.abs(dy) > 40) { strum(state.chord, ac.currentTime, dy > 0 ? 'd' : 'u', state.vel, 2); flashPad(ac.currentTime); padY = e.clientY; }
-});
-window.addEventListener('pointerup', () => padY = null);
-// キーボード: 本家 KANTAN Play online の InputMap と同じ割り当て
-//   1〜7 / テンキー / Z X C (1 2 3) A S D (4 5 6) Q W E (7 8 9)   8 = ♭  9 = ♯   0 = 〜 (ストローク)
-//   V B N M , = dim sus4 add9 7 M7
+pad.addEventListener('pointerdown', e => { pad.setPointerCapture(e.pointerId); ac.resume(); setSwap(true); });
+['pointerup', 'pointercancel'].forEach(ev => pad.addEventListener(ev, () => setSwap(false)));
+
+// キーボード: 本家 KANTAN Play online の ShortCutKeys と同じ割り当て (押す / 離す両方を見る)
+//   1〜7 / テンキー / Z X C (1 2 3) A S D (4 5 6) Q W E (7 8 9)   8 = ♭  9 = ♯ (押している間)
+//   0 = 〜 (押している間メジャー↔マイナー)   V B N M , = dim sus4 add9 7 M7 (押している間)
+//   - = キー下げ  = / + = キー上げ   F1〜F5 = アルペジオ選択   Space = ストローク (クローン独自)
 const KEYMAP = {
   '1': ['deg', 1], 'z': ['deg', 1], '2': ['deg', 2], 'x': ['deg', 2], '3': ['deg', 3], 'c': ['deg', 3],
   '4': ['deg', 4], 'a': ['deg', 4], '5': ['deg', 5], 's': ['deg', 5], '6': ['deg', 6], 'd': ['deg', 6],
   '7': ['deg', 7], 'q': ['deg', 7], '8': ['shift', -1], 'w': ['shift', -1], '9': ['shift', 1], 'e': ['shift', 1],
-  '0': ['strum'], ' ': ['strum'],
+  '0': ['swap'], ' ': ['strum'], '-': ['key', -1], '=': ['key', 1], '+': ['key', 1],
   'v': ['mod', 'dim'], 'b': ['mod', 'sus4'], 'n': ['mod', '9'], 'm': ['mod', '7'], ',': ['mod', 'M7'],
+  'f1': ['arp', 0], 'f2': ['arp', 1], 'f3': ['arp', 2], 'f4': ['arp', 3], 'f5': ['arp', 4],
 };
-function hit() { strum(state.chord, ac.currentTime, 'd', state.vel, 2); flashPad(ac.currentTime); }
 window.addEventListener('keydown', e => {
   if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
   const a = KEYMAP[e.key.toLowerCase()]; if (!a) return;
   e.preventDefault(); ac.resume();
   switch (a[0]) {
-    case 'deg':   setDeg(a[1]); if (state.pattern === 'manual') hit(); break;
-    case 'shift': setShift(state.shift === a[1] ? 0 : a[1]); break;
-    case 'mod':   setMod(state.mod === a[1] ? null : a[1]); break;
-    case 'strum': hit(); break;
+    case 'deg':   pressDeg(a[1]); break;
+    case 'shift': setShift(a[1]); break;
+    case 'mod':   setMod(a[1]); break;
+    case 'swap':  setSwap(true); break;
+    case 'key':   setKey(state.key + a[1]); break;
+    case 'arp':   changeArp(a[1]); break;
+    case 'strum': strum(state.chord, ac.currentTime, 'd', state.vel, 2); flashButtons(); break;
   }
 });
+window.addEventListener('keyup', e => {
+  const a = KEYMAP[e.key.toLowerCase()]; if (!a) return;
+  switch (a[0]) {
+    case 'deg':   releaseDeg(a[1]); break;
+    case 'shift': if (state.shift === a[1]) setShift(0); break;
+    case 'mod':   if (state.mod === a[1]) setMod(null); break;
+    case 'swap':  setSwap(false); break;
+  }
+});
+window.addEventListener('blur', () => { pressed.forEach(d => releaseDeg(d)); setSwap(false); });
 
-renderKey(); setPattern('manual'); setBpm(100); setArp('updown'); setBass('alt'); setStrum('folk'); loadInstrument('guitar'); loadBass(); initMidi();
-
+renderKey(); setPattern('manual'); setBpm(100); setArp('updown'); setBass('alt'); setStrum('folk'); setOctave(0); loadInstrument('guitar'); loadBass(); initMidi();
 </script>
 </body>
 </html>
