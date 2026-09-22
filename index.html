@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>KANTAN Play clone</title>
+<style>
+  :root { --bg:#fff; --fg:#111; --key:#2b1d1a; --pad:#ee9955; --btn:#e6e6e6; --active:#ee9955; --sel:#6cc; }
+  * { box-sizing:border-box; user-select:none; -webkit-user-select:none; touch-action:manipulation; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif; }
+  .wrap { display:flex; flex-wrap:wrap; gap:24px; justify-content:center; padding:16px; }
+  .player { width:600px; max-width:100%; display:grid; gap:10px; align-content:start; }
+  .outrow input[type=range] { vertical-align:middle; width:140px; }
+  .row { display:grid; gap:10px; }
+  .keyrow { grid-template-columns:90px 80px 1fr 80px; align-items:center; }
+  .logo { font-weight:900; font-size:18px; line-height:1.1; color:var(--pad); letter-spacing:-1px; }
+  .keybtn { height:76px; background:#555; color:#fff; font-size:30px; border:none; border-radius:6px; cursor:pointer; }
+  .keydisp { height:76px; background:var(--btn); display:flex; align-items:center; justify-content:center; gap:12px; font-size:30px; font-weight:800; border-radius:4px; }
+  .keydisp small { font-size:16px; font-weight:500; }
+  .instrow { grid-template-columns:1fr 80px; }
+  .instdisp { height:76px; background:var(--btn); display:flex; align-items:center; justify-content:center; font-size:34px; font-weight:700; border-radius:4px; cursor:pointer; }
+  .instsel { height:76px; background:var(--btn); font-size:28px; border:none; border-radius:4px; cursor:pointer; }
+  .patrow { grid-template-columns:repeat(7,1fr); }
+  .pat { height:64px; padding:2px; background:#fff; border:3px solid #444; border-radius:4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:11px; gap:4px; }
+  .pat.active { border-color:var(--active); background:#fff3e8; }
+  .pat .dots { display:grid; grid-template-columns:repeat(8,6px); gap:2px; }
+  .pat .dots i { width:6px; height:6px; background:#ddd; border-radius:1px; }
+  .pat .dots i.on { background:var(--pad); }
+  .main { grid-template-columns:1fr 1fr 1fr 130px; grid-template-rows:repeat(3,110px); }
+  .deg { background:var(--key); color:#fff; border:none; border-radius:4px; font-size:44px; font-weight:800; position:relative; cursor:pointer; }
+  .deg small { position:absolute; left:8px; bottom:6px; font-size:18px; font-weight:600; }
+  .deg.on, .deg:active { background:var(--active); color:#222; }
+  .deg.shift.on { background:var(--sel); }
+  .deg.hit, .mod.hit { background:#fff; color:var(--pad); box-shadow:0 0 0 4px var(--pad) inset; }
+  .pad { grid-row:1 / span 3; grid-column:4; background:var(--pad); border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:44px; color:#fff; cursor:pointer; }
+  .pad.hit { filter:brightness(1.2); }
+  .modrow { grid-template-columns:repeat(5,1fr); }
+  .mod { height:76px; background:var(--btn); border:none; border-radius:4px; font-size:30px; font-weight:700; color:#555; cursor:pointer; }
+  .mod.on { background:var(--active); color:#222; }
+  .outrow { text-align:center; font-size:14px; color:#555; } .outrow select { font-size:14px; padding:4px; }
+  .now { text-align:center; font-size:22px; min-height:30px; }
+  .now b { font-size:28px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="player">
+    <div class="row keyrow">
+      <div class="logo">KANTAN<br>clone</div>
+      <button class="keybtn" id="keyDown">♭</button>
+      <div class="keydisp"><small>Key</small><span id="keyName">C/Am</span></div>
+      <button class="keybtn" id="keyUp">♯</button>
+    </div>
+    <div class="row instrow">
+      <div class="instdisp" id="instName">Ac.Guitar</div>
+      <select class="instsel" id="instSel"></select>
+    </div>
+    <div class="row patrow" id="patrow"></div>
+    <div class="row main" id="main">
+      <button class="deg" data-deg="7">7<small></small></button>
+      <button class="deg shift" data-shift="-1">♭</button>
+      <button class="deg shift" data-shift="1">♯</button>
+      <div class="pad" id="pad">〜</div>
+      <button class="deg" data-deg="4">4<small></small></button>
+      <button class="deg" data-deg="5">5<small></small></button>
+      <button class="deg" data-deg="6">6<small></small></button>
+      <button class="deg" data-deg="1">1<small></small></button>
+      <button class="deg" data-deg="2">2<small></small></button>
+      <button class="deg" data-deg="3">3<small></small></button>
+    </div>
+    <div class="row modrow" id="modrow">
+      <button class="mod" data-mod="dim">dim</button>
+      <button class="mod" data-mod="sus4">sus4</button>
+      <button class="mod" data-mod="9">9</button>
+      <button class="mod" data-mod="7">7</button>
+      <button class="mod" data-mod="M7">M7</button>
+    </div>
+    <div class="now"><span id="nowChord">—</span> &nbsp; <span id="nowBpm"></span></div>
+    <div class="outrow"><label>テンポ <input type="range" id="bpmSl" min="40" max="220" value="100"></label></div>
+    <div class="outrow"><label>ストローク <select id="strumSel"></select></label> &nbsp; <label>アルペジオ <select id="arpSel"></select></label> &nbsp; <label>ベース <select id="bassSel"></select></label></div>
+    <div class="outrow"><label>MIDI 出力 <select id="midiSel"><option value="">内蔵音源 (soundfont)</option></select></label> <span id="midiStatus"></span></div>
+    <div class="outrow"><label>MIDI 入力 <select id="midiInSel"><option value="">なし</option></select></label> <span class="small" style="font-size:12px;color:#888">白鍵 C〜B → 1〜7、黒鍵 → ♭/♯ 付き</span></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+<script>
+// ---------- 音楽理論 ----------
+const NOTE_NAMES = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
+const MAJOR = [0,2,4,5,7,9,11];
+const TRIAD = ['maj','min','min','maj','maj','min','dim'];    // 各度数の三和音
+const RELATIVE_MINOR = t => NOTE_NAMES[(t + 9) % 12] + 'm';
+
+// intervals: 修飾ごとの構成音 (半音)
+function chordIntervals(quality, mod) {
+  const third = quality === 'maj' ? 4 : 3;
+  const fifth = quality === 'dim' ? 6 : 7;
+  switch (mod) {
+    case 'dim':  return [0,3,6];
+    case 'sus4': return [0,5,7];
+    case '9':    return [0,third,fifth,14];
+    case '7':    return [0,third,fifth,10];
+    case 'M7':   return [0,third,fifth,11];
+    default:     return [0,third,fifth];
+  }
+}
+function chordName(root, quality, mod) {
+  const n = NOTE_NAMES[root % 12];
+  if (mod === 'dim') return n + 'dim';
+  if (mod === 'sus4') return n + 'sus4';
+  const q = quality === 'maj' ? '' : (quality === 'dim' ? 'dim' : 'm');
+  if (mod === '9') return n + q + 'add9';
+  if (mod === '7') return n + q + '7';
+  if (mod === 'M7') return n + (quality === 'maj' ? 'M7' : 'mM7');
+  return n + q;
+}
+// 度数 + 半音シフト + 修飾 → { name, midi[] } (ギター風の広いボイシング)
+function buildChord(tonic, deg, shift, mod) {
+  const quality = TRIAD[deg - 1];
+  const root = (tonic + MAJOR[deg - 1] + shift + 12) % 12;
+  const iv = chordIntervals(quality, mod);
+  const base = 48 + root;                            // C3 付近
+  const notes = [base, base + iv[1] + 12, base + iv[2] + 12, base + 12 + 12];
+  if (iv[3] !== undefined) notes.push(base + (iv[3] % 12) + 24);
+  notes.push(base + iv[1] + 24);
+  return { name: chordName(root, quality, mod), midi: notes.sort((a, b) => a - b), root };
+}
+
+// ---------- リズムパターン ----------
+// steps: 1 小節を 16 分割 (waltz は 12)。各 step: d=ダウン u=アップ a=アルペジオ(index) / k s h = ドラム
+const S = (str) => str.split(' ').map(t => t === '.' ? {} : {
+  d: t.includes('D'), u: t.includes('U'), a: /a(\d)/.test(t) ? +t.match(/a(\d)/)[1] : undefined,
+  k: t.includes('k'), s: t.includes('s'), h: t.includes('h'), acc: t.includes('!'),
+});
+const PATTERNS = {
+  manual:  { label: '手弾き', beats: 4, steps: null },
+  ballad:  { label: 'Ballad', beats: 4, steps: S('a0k! . a1 . a2h . a3 . a4s . a5h . a6 . a7h .') },
+  eight:   { label: '8beat', beats: 4, strum: true, steps: S('D!k . . . Ds . . Uh D!k . . Uh Ds . . Uh') },
+  sixteen: { label: '16beat', beats: 4, strum: true, steps: S('D!k Uh . Uh Ds Uh Dh Uh Dk Uh . Uk Ds Uh Dh Uh') },
+  waltz:   { label: 'Waltz', beats: 3, steps: S('a0k! . . . Dh . . . Dh . . .') },
+  bossa:   { label: 'Bossa', beats: 4, strum: true, steps: S('a0k . h Dh . . Dk . a0k . h Dh . . Dk .') },
+  rock:    { label: 'Rock', beats: 4, strum: true, steps: S('D!k D . Dh D!s D . Dh D!k D . Dk D!s D . Dh') },
+};
+// ストロークの弾き方。strum:true のパターンではコードの D/U をこちらで決め、ドラムはパターンのまま
+const STRUMS = {
+  quarter: { label: '4分', steps: S('D! . . . D . . . D! . . . D . . .') },
+  eighth:  { label: '8分', steps: S('D! . D . D . D . D! . D . D . D .') },
+  folk:    { label: 'フォーク', steps: S('D! . . . D U . U D! . . . D U . U') },
+  sync:    { label: 'シンコペ', steps: S('D! . D U . U D U . U D! . D U . U') },
+  cutting: { label: 'カッティング', steps: S('D! U D U D U D U D! U D U D U D U') },
+  offbeat: { label: '裏打ち', steps: S('. . U . . . U . . . U . . . U .') },
+  longs:   { label: '2分', steps: S('D! . . . . . . . D . . . . . . .') },
+};
+// アルペジオの形: a0..a7 の位置 → コード構成音のインデックス
+const ARPEGGIOS = {
+  updown: { label: '上下', seq: [0,1,2,3,4,3,2,1] },
+  up:     { label: '上昇', seq: [0,1,2,3,4,5,1,2] },
+  broken: { label: '分散', seq: [0,2,1,3,2,4,3,5] },
+  pedal:  { label: 'ペダル', seq: [0,3,0,4,0,3,0,5] },
+  wide:   { label: 'ワイド', seq: [0,4,2,5,1,4,3,5] },
+};
+// ベース奏法
+const BASSES = { long: { label: '全音符' }, root: { label: 'ルート' }, alt: { label: 'ルート/5度' }, walk: { label: 'ウォーキング' }, octave: { label: 'オクターブ' } };
+const INSTRUMENTS = {   // gleitz FluidR3_GM の名前と GM プログラム番号
+  guitar:  { label: 'Ac.Guitar', sf: 'acoustic_guitar_steel', gm: 25 },
+  piano:   { label: 'Piano', sf: 'acoustic_grand_piano', gm: 0 },
+  epiano:  { label: 'E.Piano', sf: 'electric_piano_1', gm: 4 },
+  strings: { label: 'Strings', sf: 'string_ensemble_1', gm: 48 },
+  organ:   { label: 'Organ', sf: 'drawbar_organ', gm: 16 },
+  brass:   { label: 'Brass', sf: 'brass_section', gm: 61 },
+};
+
+// ---------- オーディオ ----------
+const ac = new (window.AudioContext || window.webkitAudioContext)();
+const unlock = () => { if (ac.state !== 'running') ac.resume(); };
+['pointerdown','keydown','touchstart','click'].forEach(ev => window.addEventListener(ev, unlock, { capture: true }));
+const master = ac.createGain(); master.gain.value = 1.0; master.connect(ac.destination);
+let inst = null, instLoading = null, instId = 'guitar';
+// soundfont が読めない時のフォールバック (単純な減衰オシレータ)
+const synth = { play(m, t, o) {
+  const f = 440 * Math.pow(2, (m - 69) / 12), g = ac.createGain(), osc = ac.createOscillator();
+  osc.type = 'triangle'; osc.frequency.value = f; osc.connect(g); g.connect(master);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((o.gain || 1) * 0.25, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + (o.duration || 1)); osc.start(t); osc.stop(t + (o.duration || 1) + 0.05);
+} };
+// ---------- Web MIDI 出力 ----------
+// inst と同じ play(midi, time, {gain, duration}) インターフェースで、PC 上の MIDI 音源へ送る
+const midi = { access: null, out: null, in: null, ch: 0, bassCh: 1, drumCh: 9,
+  toMs(t) { return performance.now() + (t - ac.currentTime) * 1000; },   // AudioContext 時刻 → DOMHighResTimeStamp
+  play(m, t, o) {
+    const v = Math.max(1, Math.min(127, Math.round((o.gain || 1) * 105)));
+    this.out.send([0x90 | this.ch, m, v], this.toMs(t));
+    this.out.send([0x80 | this.ch, m, 0], this.toMs(t + (o.duration || 1)));
+  },
+  drum(note, t, vel) {
+    if (!this.out) return false;
+    this.out.send([0x90 | this.drumCh, note, Math.max(1, Math.min(127, Math.round(vel * 115)))], this.toMs(t));
+    this.out.send([0x80 | this.drumCh, note, 0], this.toMs(t + 0.1));
+    return true;
+  },
+  program(gm) { if (this.out) { this.out.send([0xC0 | this.ch, gm]); this.out.send([0xC0 | this.bassCh, 32]); } },
+  allOff() { if (this.out) { this.out.send([0xB0 | this.ch, 123, 0]); this.out.send([0xB0 | this.bassCh, 123, 0]); } },
+};
+midi.bassOut = { play(m, t, o) {
+  const v = Math.max(1, Math.min(127, Math.round((o.gain || 1) * 105)));
+  midi.out.send([0x90 | midi.bassCh, m, v], midi.toMs(t));
+  midi.out.send([0x80 | midi.bassCh, m, 0], midi.toMs(t + (o.duration || 1)));
+} };
+// MIDI 入力: 白鍵 C D E F G A B → 度数 1〜7、黒鍵 → 下の白鍵に ♯。ベロシティで強弱
+const PC_TO_DEG = { 0: [1, 0], 1: [1, 1], 2: [2, 0], 3: [2, 1], 4: [3, 0], 5: [4, 0], 6: [4, 1], 7: [5, 0], 8: [5, 1], 9: [6, 0], 10: [6, 1], 11: [7, 0] };
+function onMidiIn(e) {
+  const [st, note, vel] = e.data, cmd = st & 0xf0;
+  if (cmd === 0x90 && vel > 0) {
+    const [deg, shift] = PC_TO_DEG[note % 12];
+    ac.resume(); setShift(shift); setDeg(deg);
+    if (state.pattern === 'manual') strum(state.chord, ac.currentTime, 'd', vel / 100, 2);
+    flashPad(ac.currentTime);
+  }
+}
+async function initMidi() {
+  const sel = document.getElementById('midiSel'), st = document.getElementById('midiStatus');
+  if (!navigator.requestMIDIAccess) { st.textContent = '(このブラウザは Web MIDI 非対応)'; return; }
+  try { midi.access = await navigator.requestMIDIAccess(); } catch (e) { st.textContent = '(MIDI アクセス拒否)'; return; }
+  const refresh = () => {
+    const cur = sel.value; sel.length = 1;
+    for (const o of midi.access.outputs.values()) sel.add(new Option(o.name, o.id));
+    sel.value = [...sel.options].some(x => x.value === cur) ? cur : '';
+  };
+  const inSel = document.getElementById('midiInSel');
+  const refreshIn = () => {
+    const cur = inSel.value; inSel.length = 1;
+    for (const i of midi.access.inputs.values()) inSel.add(new Option(i.name, i.id));
+    inSel.value = [...inSel.options].some(x => x.value === cur) ? cur : '';
+  };
+  refresh(); refreshIn(); midi.access.onstatechange = () => { refresh(); refreshIn(); };
+  inSel.onchange = () => {
+    if (midi.in) midi.in.onmidimessage = null;
+    midi.in = midi.access.inputs.get(inSel.value) || null;
+    if (midi.in) midi.in.onmidimessage = onMidiIn;
+  };
+  sel.onchange = () => {
+    midi.allOff();
+    midi.out = midi.access.outputs.get(sel.value) || null;
+    if (midi.out) { midi.program(INSTRUMENTS[instId].gm); inst = midi; bass = midi.bassOut; st.textContent = 'MIDI ch1 / bass ch2 / drums ch10'; }
+    else { st.textContent = ''; loadInstrument(instId); loadBass(); }
+  };
+}
+async function loadInstrument(id) {
+  instId = id;
+  const nameEl = document.getElementById('instName');
+  nameEl.textContent = INSTRUMENTS[id].label + ' …';
+  document.getElementById('instSel').value = id;
+  if (midi.out) { midi.program(INSTRUMENTS[id].gm); inst = midi; nameEl.textContent = INSTRUMENTS[id].label; return; }
+  try {
+    if (typeof Soundfont === 'undefined') throw new Error('soundfont-player not loaded');
+    instLoading = Soundfont.instrument(ac, INSTRUMENTS[id].sf, { soundfont: 'FluidR3_GM', destination: master });
+    inst = await instLoading;
+    nameEl.textContent = INSTRUMENTS[id].label;
+  } catch (e) {
+    console.error('soundfont load failed, using synth', e);
+    inst = synth; nameEl.textContent = INSTRUMENTS[id].label + ' (synth)';
+  }
+}
+// 人間が弾いている風のゆらぎ: 発音タイミング・強さ・ストロークの速さを毎回少しばらつかせる
+const HUMAN = { time: 0.014, vel: 0.15, strum: [0.008, 0.022] };
+const jitter = (w) => (Math.random() + Math.random() - 1) * w;          // 三角分布 (中央寄り)
+const hVel = (v) => Math.max(0.1, Math.min(1.5, v * (1 + jitter(HUMAN.vel))));
+function strum(chord, t, dir, vel, dur) {
+  if (!inst || !chord) return;
+  const notes = dir === 'u' ? [...chord.midi].reverse().slice(0, 4) : chord.midi;
+  const spread = HUMAN.strum[0] + Math.random() * (HUMAN.strum[1] - HUMAN.strum[0]);
+  const t0 = Math.max(ac.currentTime, t + jitter(HUMAN.time)), v = hVel(vel);
+  notes.forEach((m, i) => inst.play(m, t0 + i * spread, { gain: v * (dir === 'u' ? 0.7 : 1) * (1 + jitter(0.08)), duration: dur }));
+}
+function arp(chord, pos, t, vel, dur) {
+  if (!inst || !chord) return;
+  const seq = ARPEGGIOS[state.arp].seq, idx = seq[pos % seq.length];
+  inst.play(chord.midi[idx % chord.midi.length], Math.max(ac.currentTime, t + jitter(HUMAN.time)), { gain: hVel(vel), duration: dur });
+}
+// ベース: キックに合わせてルート → 5 度を交互に弾く
+let bass = null;
+const bassSynth = { play(m, t, o) {
+  const f = 440 * Math.pow(2, (m - 69) / 12), g = ac.createGain(), osc = ac.createOscillator(), lp = ac.createBiquadFilter();
+  osc.type = 'sawtooth'; osc.frequency.value = f; lp.type = 'lowpass'; lp.frequency.value = 500; osc.connect(lp); lp.connect(g); g.connect(master);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((o.gain || 1) * 0.5, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + (o.duration || 1)); osc.start(t); osc.stop(t + (o.duration || 1) + 0.05);
+} };
+async function loadBass() {
+  if (midi.out) { bass = midi.bassOut; return; }
+  try { bass = await Soundfont.instrument(ac, 'acoustic_bass', { soundfont: 'FluidR3_GM', destination: master }); }
+  catch (e) { console.error('bass soundfont load failed, using synth', e); bass = bassSynth; }
+}
+function bassNote(chord, iv, t, vel, dur) {          // iv = ルートからの半音
+  if (!bass || !chord) return;
+  let m = 36 + chord.root + iv;                          // C2 付近
+  while (m > 47) m -= 12;
+  bass.play(m, Math.max(ac.currentTime, t + jitter(0.006)), { gain: hVel(vel), duration: dur });
+}
+// 奏法ごとのベースのスケジュール。s = 小節内 step、ev = その step のイベント
+function bassStep(s, p, ev, t, v) {
+  const chord = state.chord; if (!chord) return;
+  const perBeat = p.steps.length / p.beats, sd = stepDur();
+  const third = chord.midi[1] - chord.midi[0] - 12 <= 3 ? 3 : 4;   // マイナーなら短 3 度
+  switch (state.bass) {
+    case 'long':   if (s === 0) bassNote(chord, 0, t, v, sd * p.steps.length); break;
+    case 'root':   if (ev.k) bassNote(chord, 0, t, v, sd * 4); break;
+    case 'alt':    if (ev.k) bassNote(chord, (kickCount++ % 2) ? 7 : 0, t, v, sd * 4); break;
+    case 'walk':   if (s % perBeat === 0) bassNote(chord, [0, third, 7, 9][(s / perBeat) % 4], t, v * 0.9, sd * perBeat * 0.9); break;
+    case 'octave': if (s % 2 === 0) bassNote(chord, (s / 2) % 2 ? 12 : 0, t, v * (s % perBeat === 0 ? 1 : 0.8), sd * 1.6); break;
+  }
+}
+// シンプルなシンセドラム
+function drum(kind, t, vel) {
+  if (midi.drum({ k: 36, s: 38, h: 42 }[kind], t, vel)) return;
+  const g = ac.createGain(); g.connect(master);
+  if (kind === 'k') {
+    const o = ac.createOscillator(); o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+    g.gain.setValueAtTime(vel, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25); o.connect(g); o.start(t); o.stop(t + 0.3);
+  } else {
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.2, ac.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = kind === 'h' ? 'highpass' : 'bandpass'; f.frequency.value = kind === 'h' ? 8000 : 1800;
+    const len = kind === 'h' ? 0.04 : 0.15;
+    g.gain.setValueAtTime(vel * (kind === 'h' ? 0.35 : 0.6), t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+    src.connect(f); f.connect(g); src.start(t); src.stop(t + len + 0.02);
+  }
+}
+
+// ---------- 状態 ----------
+const state = { tonic: 0, deg: null, shift: 0, mod: null, pattern: 'manual', bpm: 100, vel: 1.0, chord: null, arp: 'updown', bass: 'alt', strum: 'folk' };
+function updateChord() {
+  state.chord = state.deg ? buildChord(state.tonic, state.deg, state.shift, state.mod) : null;
+  document.getElementById('nowChord').innerHTML = state.chord ? `<b>${state.chord.name}</b>` : '—';
+}
+function renderKey() {
+  document.getElementById('keyName').textContent = NOTE_NAMES[state.tonic] + '/' + RELATIVE_MINOR(state.tonic);
+  document.querySelectorAll('.deg[data-deg]').forEach(b => {
+    const c = buildChord(state.tonic, +b.dataset.deg, 0, null);
+    b.querySelector('small').textContent = c.name;
+  });
+}
+function setPattern(id) {
+  state.pattern = id;
+  document.querySelectorAll('.pat').forEach(p => p.classList.toggle('active', p.dataset.pat === id));
+}
+function setMod(mod) {
+  state.mod = mod;
+  document.querySelectorAll('.mod').forEach(b => b.classList.toggle('on', b.dataset.mod === mod));
+  updateChord();
+}
+function setShift(s) {
+  state.shift = s;
+  document.querySelectorAll('.deg.shift').forEach(b => b.classList.toggle('on', +b.dataset.shift === s));
+  updateChord();
+}
+function setDeg(d) {
+  state.deg = d;
+  document.querySelectorAll('.deg[data-deg]').forEach(b => b.classList.toggle('on', +b.dataset.deg === d));
+  updateChord();
+}
+function setBpm(b) { state.bpm = b; document.getElementById('nowBpm').textContent = '♩=' + b; document.getElementById('bpmSl').value = b; }
+function setArp(id) { state.arp = id; document.getElementById('arpSel').value = id; }
+function setBass(id) { state.bass = id; document.getElementById('bassSel').value = id; }
+function setStrum(id) { state.strum = id; document.getElementById('strumSel').value = id; }
+
+// ---------- シーケンサ (lookahead scheduling) ----------
+let step = 0, nextTime = 0, timer = null, onBar = null, paused = false, barStepDone = -1, kickCount = 0;
+function stepDur() { const p = PATTERNS[state.pattern]; return (60 / state.bpm) / (p.steps.length / p.beats); }
+function tick() {
+  while (!paused && nextTime < ac.currentTime + 0.15) {
+    const p = PATTERNS[state.pattern];
+    if (!p.steps) { nextTime = ac.currentTime + 0.1; break; }
+    if (step % p.steps.length === 0 && step !== barStepDone) {          // 小節頭 (再開後に同じ小節頭で 2 回呼ばない)
+      barStepDone = step; kickCount = 0;
+      if (onBar && onBar(nextTime)) { paused = true; break; }            // true を返したら止めて待つ
+    }
+    const dr = p.steps[step % p.steps.length], t = nextTime;
+    const ev = p.strum ? { ...dr, ...STRUMS[state.strum].steps[step % 16] } : dr;   // ストローク系はコードの D/U を弾き方で置き換える
+    const v = state.vel * (ev.acc ? 1 : 0.8);
+    if (dr.k) drum('k', t + jitter(0.004), hVel(v));
+    bassStep(step % p.steps.length, p, dr, t, v); if (dr.s) drum('s', t + jitter(0.006), hVel(v)); if (dr.h) drum('h', t + jitter(0.008), hVel(v * 0.9));
+    const dur = stepDur() * (ev.a !== undefined ? 4 : 2.5);
+    if (ev.d) strum(state.chord, t, 'd', v, dur);
+    if (ev.u) strum(state.chord, t, 'u', v, dur);
+    if (ev.a !== undefined) arp(state.chord, ev.a, t, v, dur);
+    if (state.chord && (ev.d || ev.u || ev.a !== undefined)) flashPad(t);
+    step++; nextTime += stepDur();
+  }
+}
+function startSeq() { if (timer) return; step = 0; barStepDone = -1; paused = false; nextTime = ac.currentTime + 0.05; timer = setInterval(tick, 25); }
+function resumeSeq() { if (!paused) return; paused = false; nextTime = ac.currentTime + 0.03; }   // 待っていた小節頭から再開
+function stopSeq() { clearInterval(timer); timer = null; onBar = null; paused = false; midi.allOff(); }
+// 音が鳴る瞬間にパッドと現在の度数ボタン (と修飾ボタン) を光らせる
+const flashTimers = new Map();
+function flashPad(t) {
+  const els = [document.getElementById('pad'), document.querySelector('.deg[data-deg].on'), document.querySelector('.mod.on')].filter(Boolean);
+  setTimeout(() => els.forEach(el => {
+    el.classList.add('hit'); clearTimeout(flashTimers.get(el));
+    flashTimers.set(el, setTimeout(() => el.classList.remove('hit'), 90));
+  }), Math.max(0, (t - ac.currentTime) * 1000));
+}
+
+// ---------- UI ----------
+document.getElementById('keyDown').onclick = () => { state.tonic = (state.tonic + 11) % 12; renderKey(); updateChord(); };
+document.getElementById('keyUp').onclick = () => { state.tonic = (state.tonic + 1) % 12; renderKey(); updateChord(); };
+const sel = document.getElementById('instSel');
+for (const [id, v] of Object.entries(INSTRUMENTS)) sel.add(new Option(v.label, id));
+sel.onchange = () => loadInstrument(sel.value);
+document.getElementById('instName').onclick = () => { const ids = Object.keys(INSTRUMENTS); loadInstrument(ids[(ids.indexOf(instId) + 1) % ids.length]); };
+
+for (const [id, v] of Object.entries(ARPEGGIOS)) document.getElementById('arpSel').add(new Option(v.label, id));
+for (const [id, v] of Object.entries(BASSES)) document.getElementById('bassSel').add(new Option(v.label, id));
+for (const [id, v] of Object.entries(STRUMS)) document.getElementById('strumSel').add(new Option(v.label, id));
+document.getElementById('strumSel').onchange = e => setStrum(e.target.value);
+document.getElementById('arpSel').onchange = e => setArp(e.target.value);
+document.getElementById('bassSel').onchange = e => setBass(e.target.value);
+document.getElementById('bpmSl').oninput = e => setBpm(+e.target.value);
+const patrow = document.getElementById('patrow');
+for (const [id, p] of Object.entries(PATTERNS)) {
+  const el = document.createElement('div'); el.className = 'pat'; el.dataset.pat = id;
+  const dots = (p.steps || []).slice(0, 16).map(e => `<i class="${e.d || e.u || e.a !== undefined ? 'on' : ''}"></i>`).join('');
+  el.innerHTML = `<div class="dots">${dots}</div>${p.label}`;
+  el.onclick = () => { ac.resume(); setPattern(id); if (id === 'manual') stopSeq(); else startSeq(); };
+  patrow.appendChild(el);
+}
+document.querySelectorAll('.deg[data-deg]').forEach(b => {
+  b.addEventListener('pointerdown', () => {
+    ac.resume(); setDeg(+b.dataset.deg);
+    if (state.pattern === 'manual') strum(state.chord, ac.currentTime, 'd', state.vel, 2);
+  });
+});
+document.querySelectorAll('.deg.shift').forEach(b => b.addEventListener('pointerdown', () => setShift(state.shift === +b.dataset.shift ? 0 : +b.dataset.shift)));
+document.querySelectorAll('.mod').forEach(b => b.addEventListener('pointerdown', () => setMod(state.mod === b.dataset.mod ? null : b.dataset.mod)));
+const pad = document.getElementById('pad');
+let padY = null;
+pad.addEventListener('pointerdown', e => { ac.resume(); padY = e.clientY; strum(state.chord, ac.currentTime, 'd', state.vel, 2); flashPad(ac.currentTime); });
+pad.addEventListener('pointermove', e => {                  // 上下になぞるとダウン/アップストローク
+  if (padY === null) return;
+  const dy = e.clientY - padY;
+  if (Math.abs(dy) > 40) { strum(state.chord, ac.currentTime, dy > 0 ? 'd' : 'u', state.vel, 2); flashPad(ac.currentTime); padY = e.clientY; }
+});
+window.addEventListener('pointerup', () => padY = null);
+// キーボード: 本家 KANTAN Play online の InputMap と同じ割り当て
+//   1〜7 / テンキー / Z X C (1 2 3) A S D (4 5 6) Q W E (7 8 9)   8 = ♭  9 = ♯   0 = 〜 (ストローク)
+//   V B N M , = dim sus4 add9 7 M7
+const KEYMAP = {
+  '1': ['deg', 1], 'z': ['deg', 1], '2': ['deg', 2], 'x': ['deg', 2], '3': ['deg', 3], 'c': ['deg', 3],
+  '4': ['deg', 4], 'a': ['deg', 4], '5': ['deg', 5], 's': ['deg', 5], '6': ['deg', 6], 'd': ['deg', 6],
+  '7': ['deg', 7], 'q': ['deg', 7], '8': ['shift', -1], 'w': ['shift', -1], '9': ['shift', 1], 'e': ['shift', 1],
+  '0': ['strum'], ' ': ['strum'],
+  'v': ['mod', 'dim'], 'b': ['mod', 'sus4'], 'n': ['mod', '9'], 'm': ['mod', '7'], ',': ['mod', 'M7'],
+};
+function hit() { strum(state.chord, ac.currentTime, 'd', state.vel, 2); flashPad(ac.currentTime); }
+window.addEventListener('keydown', e => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  const a = KEYMAP[e.key.toLowerCase()]; if (!a) return;
+  e.preventDefault(); ac.resume();
+  switch (a[0]) {
+    case 'deg':   setDeg(a[1]); if (state.pattern === 'manual') hit(); break;
+    case 'shift': setShift(state.shift === a[1] ? 0 : a[1]); break;
+    case 'mod':   setMod(state.mod === a[1] ? null : a[1]); break;
+    case 'strum': hit(); break;
+  }
+});
+
+renderKey(); setPattern('manual'); setBpm(100); setArp('updown'); setBass('alt'); setStrum('folk'); loadInstrument('guitar'); loadBass(); initMidi();
+
+</script>
+</body>
+</html>
