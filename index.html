@@ -86,7 +86,7 @@
     <div class="now"><span id="nowChord">—</span> &nbsp; <span id="nowBpm"></span></div>
     <div class="outrow"><button class="drumbtn" id="drumBtn">ドラム</button> <label><select id="drumPatSel"></select></label> &nbsp; <label>テンポ <input type="range" id="bpmSl" min="40" max="220" value="100"></label> &nbsp; <label>オクターブ <select id="octSel"><option value="-2">-2</option><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option><option value="2">+2</option></select></label></div>
     <div class="outrow"><label>ストローク <select id="strumSel"></select></label> &nbsp; <label>自動アルペジオ <select id="arpSel"></select></label> &nbsp; <label>自動ベース <select id="bassSel"></select></label></div>
-    <div class="outrow"><label>ベース音色 <select id="bassProgSel"></select></label> &nbsp; <label>手弾きベース <select id="bassStyleSel"></select></label> &nbsp; <label>ベースオクターブ <select id="bassOctSel"><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option></select></label></div>
+    <div class="outrow"><label>ベース音色 <select id="bassProgSel"></select></label> <button id="bassTest" style="font-size:12px">ch7 テスト</button> &nbsp; <label>手弾きベース <select id="bassStyleSel"></select></label> &nbsp; <label>オンコード <select id="onChordSel"></select></label> &nbsp; <label>ベースオクターブ <select id="bassOctSel"><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option></select></label></div>
     <div class="outrow"><label>MIDI 出力 <select id="midiSel"><option value="">内蔵音源 (soundfont)</option></select></label> <span id="midiStatus"></span> <span id="midiMon" style="font-family:monospace;color:#888"></span></div>
     <div class="outrow"><label>MIDI 入力 <select id="midiInSel"><option value="">なし</option></select></label> <span class="small" style="font-size:12px;color:#888">白鍵 C〜B → 1〜7、黒鍵 → ♯ 付き</span></div>
   </div>
@@ -121,7 +121,7 @@ function chordName(root, minor, mod) {
   return n + q;
 }
 // KantanMusic.get_midi_note_number と同じ手順。key 0..11、deg 1..7、shift -1/0/1、swap = 〜 (メジャー↔マイナー)
-function buildChord(key, deg, shift, mod, swap, voicing, octave) {
+function buildChord(key, deg, shift, mod, swap, voicing, octave, onChord) {
   const idx = key * 9 + (deg - 1);
   const root = (CHORD_ROOT_TABLE[idx] + shift + 12) % 12;
   let minor = !!MINOR_FLAG_TABLE[idx];
@@ -130,7 +130,13 @@ function buildChord(key, deg, shift, mod, swap, voicing, octave) {
   const m = MODIFIER[mod || 'none'], mi = minor ? MINOR_MOD_MAP[m] : m;
   const base = voicing * 12 * 16 * 7 + root * 16 * 7 + mi * 7;
   const midi = [1, 2, 3, 4, 5, 6].map(p => NOTE_TABLE[base + p] + octave * 12);
-  return { name: chordName(root, minor, mod), midi, root, minor };
+  let bassRoot = root;                     // オンコードのベース音 (音名 0..11)
+  if (onChord === '3') bassRoot = (root + (minor ? 3 : 4)) % 12;
+  else if (onChord === '5') bassRoot = (root + 7) % 12;
+  else if (onChord === '7') bassRoot = (root + 10) % 12;
+  else if (onChord && onChord[0] === 'k') bassRoot = CHORD_ROOT_TABLE[key * 9 + (+onChord[1] - 1)];
+  const name = chordName(root, minor, mod) + (bassRoot !== root ? '/' + NOTE_NAMES[bassRoot] : '');
+  return { name, midi, root, minor, bassRoot };
 }
 
 // ---------- リズムパターン (自動演奏。クローン独自) ----------
@@ -177,6 +183,8 @@ const BASS_PROGRAMS = {
   square:   { label: 'Square Wave (81)', sf: 'lead_1_square', gm: 80 },
   saw:      { label: 'Saw Wave (82)', sf: 'lead_2_sawtooth', gm: 81 },
 };
+// オンコード: ベース音をルート以外にする (C/E など)。コード基準の度数か、キーの度数で指定
+const ON_CHORDS = { root: 'なし (ルート)', '3': '3度 (C/E)', '5': '5度 (C/G)', '7': '♭7度 (C/B♭)', k1: 'キーの 1 度', k2: 'キーの 2 度', k3: 'キーの 3 度', k4: 'キーの 4 度', k5: 'キーの 5 度', k6: 'キーの 6 度', k7: 'キーの 7 度' };
 // 手弾き時のベース奏法: コードボタンを押すたびにルートを鳴らす (離すと止まる)
 const BASS_STYLES = { off: { label: 'なし' }, root: { label: 'ルート' }, both: { label: 'ルート+オクターブ' }, alt: { label: 'オクターブ交互' } };
 const BASSES = { long: { label: '全音符' }, root: { label: 'ルート' }, alt: { label: 'ルート/5度' }, walk: { label: 'ウォーキング' }, octave: { label: 'オクターブ' } };
@@ -216,9 +224,13 @@ const synth = oscInst('triangle', 0.25), bassSynth = oscInst('sawtooth', 0.5, 50
 // チャンネル: コードの 6 弦 → ch1〜6 (弦ごとに 1 音 1ch)、ベース → ch7、ドラム → ch10
 const midi = { access: null, out: null, in: null, chordCh: [0, 1, 2, 3, 4, 5], bassCh: 6, drumCh: 9,
   toMs(t) { return performance.now() + (t - ac.currentTime) * 1000; },   // AudioContext 時刻 → DOMHighResTimeStamp
-  tx(out, data, ts) {                         // 送信 + 画面のモニタ (最後に送ったメッセージ)
+  mon: [], monAt: 0,
+  tx(out, data, ts) {                         // 送信 + 画面のモニタ (直近 80ms 以内に送った Note On をチャンネル順に並べる)
     out.send(data, ts);
-    if ((data[0] & 0xf0) === 0x90) document.getElementById('midiMon').textContent = `送信 ch${(data[0] & 15) + 1} note ${data[1]} vel ${data[2]}`;
+    if ((data[0] & 0xf0) !== 0x90) return;
+    const now = performance.now(); if (now - this.monAt > 80) this.mon = []; this.monAt = now;
+    this.mon.push([(data[0] & 15) + 1, data[1]]);
+    document.getElementById('midiMon').textContent = '送信 ' + this.mon.slice().sort((a, b) => a[0] - b[0]).map(([c, n]) => `ch${c}:${n}`).join(' ');
   },
   vel(g, k) { return Math.max(1, Math.min(127, Math.round((g || 1) * k))); },
   serial: 0, latest: new Map(),          // (ch, note) → 最後に鳴らした発音の id。古い Note Off が新しい音を消さないようにする
@@ -339,7 +351,7 @@ async function loadBass() {
 }
 function bassNote(chord, iv, t, vel, dur) {          // iv = ルートからの半音
   if (!bass || !chord) return;
-  let m = 36 + chord.root + iv;                          // C2 付近
+  let m = 36 + chord.bassRoot + iv;                      // C2 付近 (オンコードならその音)
   while (m > 47) m -= 12;
   bass.play(m, Math.max(ac.currentTime, t + jitter(0.006)), { gain: hVel(vel), duration: dur });
 }
@@ -379,10 +391,10 @@ const prefs = (() => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) |
 function savePref(k, v) { prefs[k] = v; try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {} }
 
 // ---------- 状態 ----------
-const state = { key: 0, deg: null, shift: 0, mod: null, swap: false, octave: 0, pattern: 'manual', bpm: 100, vel: 1.0, chord: null, arp: 'updown', bass: 'alt', strum: 'folk', bassProg: 'acoustic', bassStyle: 'root', bassOct: 0, drums: false, drumPat: 'eight' };
+const state = { key: 0, deg: null, shift: 0, mod: null, swap: false, octave: 0, pattern: 'manual', bpm: 100, vel: 1.0, chord: null, arp: 'updown', bass: 'alt', strum: 'folk', bassProg: 'acoustic', bassStyle: 'root', bassOct: 0, onChord: 'root', drums: false, drumPat: 'eight' };
 const voicing = () => INSTRUMENTS[instId].voicing;
 function updateChord() {
-  state.chord = state.deg ? buildChord(state.key, state.deg, state.shift, state.mod, state.swap, voicing(), state.octave) : null;
+  state.chord = state.deg ? buildChord(state.key, state.deg, state.shift, state.mod, state.swap, voicing(), state.octave, state.onChord) : null;
   document.getElementById('nowChord').innerHTML = state.chord ? `<b>${state.chord.name}</b>` : '—';
 }
 function renderKey() {
@@ -424,6 +436,7 @@ function setBass(id) { state.bass = id; document.getElementById('bassSel').value
 function setStrum(id) { state.strum = id; document.getElementById('strumSel').value = id; savePref('strum', id); }
 function setBassProg(id) { state.bassProg = id; document.getElementById('bassProgSel').value = id; savePref('bassProg', id); if (midi.out) midi.program(INSTRUMENTS[instId].gm); else loadBass(); }
 function setBassStyle(id) { state.bassStyle = id; document.getElementById('bassStyleSel').value = id; savePref('bassStyle', id); }
+function setOnChord(id) { state.onChord = id; document.getElementById('onChordSel').value = id; savePref('onChord', id); updateChord(); }
 function setBassOct(o) { state.bassOct = o; document.getElementById('bassOctSel').value = o; savePref('bassOct', o); }
 function setOctave(o) { state.octave = o; document.getElementById('octSel').value = o; updateChord(); savePref('octave', o); }
 
@@ -454,7 +467,7 @@ function stopHeld(when, pitches) {
 let bassAlt = 0;
 function manualBass(chord, t, vel) {     // 手弾きベース: ch2 (内蔵ならベース音色) でルートを鳴らす
   if (!bass || state.bassStyle === 'off') return;
-  const root = 36 + chord.root + state.bassOct * 12;   // C2 付近
+  const root = 36 + chord.bassRoot + state.bassOct * 12;   // C2 付近 (オンコードならその音)
   const notes = state.bassStyle === 'root' ? [root] : state.bassStyle === 'both' ? [root, root + 12] : [root + 12 * (bassAlt++ % 2)];
   notes.forEach((m, i) => { const k = 'b' + i; stopHeld(t, [k]); held.set(k, { h: bass.play(m, t, { gain: vel, duration: 3.8, hold: true }), t }); });
 }
@@ -561,7 +574,15 @@ document.getElementById('bassSel').onchange = e => setBass(e.target.value);
 for (const [id, v] of Object.entries(BASS_PROGRAMS)) document.getElementById('bassProgSel').add(new Option(v.label, id));
 for (const [id, v] of Object.entries(BASS_STYLES)) document.getElementById('bassStyleSel').add(new Option(v.label, id));
 document.getElementById('bassProgSel').onchange = e => setBassProg(e.target.value);
+document.getElementById('bassTest').onclick = () => {   // ベース音源の確認: C2 を 0.5 秒 (MIDI なら ch7)
+  ac.resume(); const t = ac.currentTime + 0.01;
+  if (!bass) { document.getElementById('midiMon').textContent = 'ベース音源が未ロード'; return; }
+  bass.play(36 + state.bassOct * 12, t, { gain: 1, duration: 0.5 });
+  if (!midi.out) document.getElementById('midiMon').textContent = '内蔵ベース音源で発音 (' + (bass === bassSynth ? 'synth' : BASS_PROGRAMS[state.bassProg].label) + ')';
+};
 document.getElementById('bassStyleSel').onchange = e => setBassStyle(e.target.value);
+for (const [id, label] of Object.entries(ON_CHORDS)) document.getElementById('onChordSel').add(new Option(label, id));
+document.getElementById('onChordSel').onchange = e => setOnChord(e.target.value);
 document.getElementById('bassOctSel').onchange = e => setBassOct(+e.target.value);
 document.getElementById('bpmSl').oninput = e => setBpm(+e.target.value);
 for (const [id, p] of Object.entries(PATTERNS)) if (p.steps) document.getElementById('drumPatSel').add(new Option(p.label, id));
@@ -632,7 +653,7 @@ state.key = prefs.key ?? 0; renderKey(); setPattern('manual');
 setBpm(prefs.bpm ?? 100); setArp(ARPEGGIOS[prefs.arp] ? prefs.arp : 'updown'); setBass(BASSES[prefs.bass] ? prefs.bass : 'alt');
 setStrum(STRUMS[prefs.strum] ? prefs.strum : 'folk'); setOctave(prefs.octave ?? 0);
 state.bassProg = BASS_PROGRAMS[prefs.bassProg] ? prefs.bassProg : 'acoustic'; document.getElementById('bassProgSel').value = state.bassProg;
-setBassStyle(BASS_STYLES[prefs.bassStyle] ? prefs.bassStyle : 'root'); setBassOct(prefs.bassOct ?? 0);
+setBassStyle(BASS_STYLES[prefs.bassStyle] ? prefs.bassStyle : 'root'); setBassOct(prefs.bassOct ?? 0); setOnChord(ON_CHORDS[prefs.onChord] ? prefs.onChord : 'root');
 setDrumPat(PATTERNS[prefs.drumPat] && PATTERNS[prefs.drumPat].steps ? prefs.drumPat : 'eight');
 arpEng.cur = prefs.arpNo ?? 0;
 loadInstrument(INSTRUMENTS[prefs.instrument] ? prefs.instrument : 'guitar'); loadBass(); initMidi();
