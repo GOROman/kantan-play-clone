@@ -87,7 +87,7 @@
     <div class="outrow"><button class="drumbtn" id="drumBtn">ドラム</button> <label><select id="drumPatSel"></select></label> &nbsp; <label>テンポ <input type="range" id="bpmSl" min="40" max="220" value="100"></label> &nbsp; <label>オクターブ <select id="octSel"><option value="-2">-2</option><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option><option value="2">+2</option></select></label></div>
     <div class="outrow"><label>ストローク <select id="strumSel"></select></label> &nbsp; <label>自動アルペジオ <select id="arpSel"></select></label> &nbsp; <label>自動ベース <select id="bassSel"></select></label></div>
     <div class="outrow"><label>ベース音色 <select id="bassProgSel"></select></label> &nbsp; <label>手弾きベース <select id="bassStyleSel"></select></label> &nbsp; <label>ベースオクターブ <select id="bassOctSel"><option value="-1">-1</option><option value="0" selected>0</option><option value="1">+1</option></select></label></div>
-    <div class="outrow"><label>MIDI 出力 <select id="midiSel"><option value="">内蔵音源 (soundfont)</option></select></label> <span id="midiStatus"></span></div>
+    <div class="outrow"><label>MIDI 出力 <select id="midiSel"><option value="">内蔵音源 (soundfont)</option></select></label> <span id="midiStatus"></span> <span id="midiMon" style="font-family:monospace;color:#888"></span></div>
     <div class="outrow"><label>MIDI 入力 <select id="midiInSel"><option value="">なし</option></select></label> <span class="small" style="font-size:12px;color:#888">白鍵 C〜B → 1〜7、黒鍵 → ♯ 付き</span></div>
   </div>
 </div>
@@ -216,13 +216,17 @@ const synth = oscInst('triangle', 0.25), bassSynth = oscInst('sawtooth', 0.5, 50
 // チャンネル: コードの 6 弦 → ch1〜6 (弦ごとに 1 音 1ch)、ベース → ch7、ドラム → ch10
 const midi = { access: null, out: null, in: null, chordCh: [0, 1, 2, 3, 4, 5], bassCh: 6, drumCh: 9,
   toMs(t) { return performance.now() + (t - ac.currentTime) * 1000; },   // AudioContext 時刻 → DOMHighResTimeStamp
+  tx(out, data, ts) {                         // 送信 + 画面のモニタ (最後に送ったメッセージ)
+    out.send(data, ts);
+    if ((data[0] & 0xf0) === 0x90) document.getElementById('midiMon').textContent = `送信 ch${(data[0] & 15) + 1} note ${data[1]} vel ${data[2]}`;
+  },
   vel(g, k) { return Math.max(1, Math.min(127, Math.round((g || 1) * k))); },
   serial: 0, latest: new Map(),          // (ch, note) → 最後に鳴らした発音の id。古い Note Off が新しい音を消さないようにする
   note(ch, m, t, o) {
     const out = this.out, key = ch * 128 + m, id = ++this.serial;
-    if (this.latest.has(key)) out.send([0x80 | ch, m, 0], this.toMs(t));   // 同じ ch・音がまだ鳴っていたら先に切ってから弾き直す
+    if (this.latest.has(key)) this.tx(out, [0x80 | ch, m, 0], this.toMs(t));   // 同じ ch・音がまだ鳴っていたら先に切ってから弾き直す
     this.latest.set(key, id);
-    out.send([0x90 | ch, m, this.vel(o.gain, 105)], this.toMs(t));
+    this.tx(out, [0x90 | ch, m, this.vel(o.gain, 105)], this.toMs(t));
     let timer = null, done = false;
     const off = (when) => {               // when 時刻に Note Off。その間に同じ ch・音が弾き直されていたら送らない
       clearTimeout(timer);
@@ -234,7 +238,7 @@ const midi = { access: null, out: null, in: null, chordCh: [0, 1, 2, 3, 4, 5], b
   play(m, t, o) { return this.note(this.chordCh[(o.ch || 0) % 6], m, t, o); },   // o.ch = 弦番号 0..5
   drum(note, t, vel) {
     if (!this.out) return false;
-    this.out.send([0x90 | this.drumCh, note, this.vel(vel, 115)], this.toMs(t));
+    this.tx(this.out, [0x90 | this.drumCh, note, this.vel(vel, 115)], this.toMs(t));
     this.out.send([0x80 | this.drumCh, note, 0], this.toMs(t + 0.1));
     return true;
   },
@@ -283,7 +287,7 @@ async function initMidi() {
     savePref('midiOut', sel.value);
     stopHeld(ac.currentTime); midi.allOff();
     midi.out = midi.access.outputs.get(sel.value) || null;
-    if (midi.out) { midi.allOff(); midi.program(INSTRUMENTS[instId].gm); inst = midi; bass = midi.bassOut; st.textContent = 'MIDI ch1〜6 (弦ごと) / bass ch7 / drums ch10'; }
+    if (midi.out) { midi.allOff(); midi.program(INSTRUMENTS[instId].gm); inst = midi; bass = midi.bassOut; st.textContent = 'MIDI ch1〜6 (弦ごと) / bass ch7 / drums ch10'; document.getElementById('instName').textContent = INSTRUMENTS[instId].label; }
     else { st.textContent = ''; loadInstrument(instId); loadBass(); }
   };
   refresh(); restore();
@@ -298,10 +302,14 @@ async function loadInstrument(id) {
   if (midi.out) { midi.program(INSTRUMENTS[id].gm); inst = midi; nameEl.textContent = INSTRUMENTS[id].label; return; }
   try {
     if (typeof Soundfont === 'undefined') throw new Error('soundfont-player not loaded');
-    inst = sfInst(await Soundfont.instrument(ac, INSTRUMENTS[id].sf, { soundfont: 'FluidR3_GM', destination: master }));
+    const sf = sfInst(await Soundfont.instrument(ac, INSTRUMENTS[id].sf, { soundfont: 'FluidR3_GM', destination: master }));
+    if (id !== instId) return;                 // 読み込み中に楽器が変わった
     nameEl.textContent = INSTRUMENTS[id].label;
+    if (midi.out) return;                      // 読み込み中に MIDI 出力が選ばれた (起動時の復元など) → 内蔵音源で上書きしない
+    inst = sf;
   } catch (e) {
     console.error('soundfont load failed, using synth', e);
+    if (midi.out) return;
     inst = synth; nameEl.textContent = INSTRUMENTS[id].label + ' (synth)';
   }
 }
@@ -327,7 +335,7 @@ async function loadBass() {
   if (midi.out) { bass = midi.bassOut; return; }
   const id = state.bassProg;
   try { const sf = sfInst(await Soundfont.instrument(ac, BASS_PROGRAMS[id].sf, { soundfont: 'FluidR3_GM', destination: master })); if (id === state.bassProg && !midi.out) bass = sf; }
-  catch (e) { console.error('bass soundfont load failed, using synth', e); bass = bassSynth; }
+  catch (e) { console.error('bass soundfont load failed, using synth', e); if (!midi.out) bass = bassSynth; }
 }
 function bassNote(chord, iv, t, vel, dur) {          // iv = ルートからの半音
   if (!bass || !chord) return;
