@@ -217,12 +217,19 @@ const synth = oscInst('triangle', 0.25), bassSynth = oscInst('sawtooth', 0.5, 50
 const midi = { access: null, out: null, in: null, chordCh: [0, 1, 2, 3, 4, 5], bassCh: 6, drumCh: 9,
   toMs(t) { return performance.now() + (t - ac.currentTime) * 1000; },   // AudioContext 時刻 → DOMHighResTimeStamp
   vel(g, k) { return Math.max(1, Math.min(127, Math.round((g || 1) * k))); },
+  serial: 0, latest: new Map(),          // (ch, note) → 最後に鳴らした発音の id。古い Note Off が新しい音を消さないようにする
   note(ch, m, t, o) {
-    const out = this.out; out.send([0x90 | ch, m, this.vel(o.gain, 105)], this.toMs(t));
-    const dur = o.duration || 1; let timer = null, done = false;
-    if (o.hold) timer = setTimeout(() => { if (!done && this.out === out) out.send([0x80 | ch, m, 0]); }, (t - ac.currentTime + dur) * 1000);   // 押しっぱなし用: stop() で先に切れる
-    else out.send([0x80 | ch, m, 0], this.toMs(t + dur));
-    return { stop: (w) => { if (done) return; done = true; clearTimeout(timer); if (this.out === out) out.send([0x80 | ch, m, 0], this.toMs(w)); } };
+    const out = this.out, key = ch * 128 + m, id = ++this.serial;
+    if (this.latest.has(key)) out.send([0x80 | ch, m, 0], this.toMs(t));   // 同じ ch・音がまだ鳴っていたら先に切ってから弾き直す
+    this.latest.set(key, id);
+    out.send([0x90 | ch, m, this.vel(o.gain, 105)], this.toMs(t));
+    let timer = null, done = false;
+    const off = (when) => {               // when 時刻に Note Off。その間に同じ ch・音が弾き直されていたら送らない
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (this.latest.get(key) === id) { this.latest.delete(key); if (this.out === out) out.send([0x80 | ch, m, 0]); } }, Math.max(0, (when - ac.currentTime) * 1000));
+    };
+    off(t + (o.duration || 1));
+    return { stop: (w) => { if (done) return; done = true; off(w); } };
   },
   play(m, t, o) { return this.note(this.chordCh[(o.ch || 0) % 6], m, t, o); },   // o.ch = 弦番号 0..5
   drum(note, t, vel) {
@@ -232,7 +239,7 @@ const midi = { access: null, out: null, in: null, chordCh: [0, 1, 2, 3, 4, 5], b
     return true;
   },
   program(gm) { if (this.out) { for (const ch of this.chordCh) this.out.send([0xC0 | ch, gm]); this.out.send([0xC0 | this.bassCh, BASS_PROGRAMS[state.bassProg].gm]); } },
-  allOff(out = this.out) { if (!out) return; for (let ch = 0; ch < 16; ch++) { out.send([0xB0 | ch, 123, 0]); out.send([0xB0 | ch, 120, 0]); } },   // 全 16ch All Notes Off + All Sound Off
+  allOff(out = this.out) { this.latest.clear(); if (!out) return; for (let ch = 0; ch < 16; ch++) { out.send([0xB0 | ch, 123, 0]); out.send([0xB0 | ch, 120, 0]); } },   // 全 16ch All Notes Off + All Sound Off
 };
 midi.bassOut = { play(m, t, o) { return midi.note(midi.bassCh, m, t, o); } };
 // MIDI 入力: 白鍵 C D E F G A B → 度数 1〜7、黒鍵 → 下の白鍵に ♯。押す/離すでアルペジオが進む。ベロシティで強弱
