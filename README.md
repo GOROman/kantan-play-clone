@@ -48,6 +48,9 @@ Web MIDI はセキュアコンテキスト (localhost / https / file) が必要�
 - **MIDI 入力**: MIDI 鍵盤の白鍵 C D E F G A B → コード 1〜7、黒鍵 → 下の白鍵に ♯。押す / 離すでアルペジオが進み、ベロシティで強弱
 - 起動時と出力切り替え時に全 16ch へ All Notes Off / All Sound Off を送る (鳴りっぱなし対策)
 
+## 設定の保存
+MIDI 出力 / 入力ポート、楽器、キー、テンポ、オクターブ、アルペジオ番号、ストローク / 自動アルペジオ / ベースの選択は `localStorage` に保存され、次回開いたときに復元される。MIDI ポートは後から接続されても保存したものが見つかり次第選び直す。
+
 ## 由来
 [GOROman/learning-jev](https://github.com/GOROman/learning-jev) の step04 (KANTAN Play クローン × Jev) から Jev 判定部分を外したもの。
 キー割り当て・アルペジオパターン・ボイシングテーブルは本家 KANTAN Play online (Godot 3) の `index.pck` から InputMap / シーン / GDScript バイトコードを読み取って移植した。

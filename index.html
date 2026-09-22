@@ -242,21 +242,28 @@ async function initMidi() {
     for (const i of midi.access.inputs.values()) inSel.add(new Option(i.name, i.id));
     inSel.value = [...inSel.options].some(x => x.value === curIn) ? curIn : '';
   };
-  refresh(); midi.access.onstatechange = refresh;
+  const restore = () => {           // 保存したポートが (後から) 見つかったら選び直す
+    if (!midi.out && prefs.midiOut && [...sel.options].some(x => x.value === prefs.midiOut)) { sel.value = prefs.midiOut; sel.onchange(); }
+    if (!midi.in && prefs.midiIn && [...inSel.options].some(x => x.value === prefs.midiIn)) { inSel.value = prefs.midiIn; inSel.onchange(); }
+  };
+  midi.access.onstatechange = () => { refresh(); restore(); };
   inSel.onchange = () => {
+    savePref('midiIn', inSel.value);
     if (midi.in) midi.in.onmidimessage = null;
     midi.in = midi.access.inputs.get(inSel.value) || null;
     if (midi.in) midi.in.onmidimessage = onMidiIn;
   };
   sel.onchange = () => {
+    savePref('midiOut', sel.value);
     stopHeld(ac.currentTime); midi.allOff();
     midi.out = midi.access.outputs.get(sel.value) || null;
     if (midi.out) { midi.allOff(); midi.program(INSTRUMENTS[instId].gm); inst = midi; bass = midi.bassOut; st.textContent = 'MIDI ch1 / bass ch2 / drums ch10'; }
     else { st.textContent = ''; loadInstrument(instId); loadBass(); }
   };
+  refresh(); restore();
 }
 async function loadInstrument(id) {
-  instId = id;
+  instId = id; savePref('instrument', id);
   const nameEl = document.getElementById('instName');
   nameEl.textContent = INSTRUMENTS[id].label + ' …';
   document.getElementById('instSel').value = id;
@@ -331,6 +338,11 @@ function drum(kind, t, vel) {
   }
 }
 
+// ---------- 設定の保存 (localStorage) ----------
+const PREF_KEY = 'kantan-play-clone';
+const prefs = (() => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch (e) { return {}; } })();
+function savePref(k, v) { prefs[k] = v; try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {} }
+
 // ---------- 状態 ----------
 const state = { key: 0, deg: null, shift: 0, mod: null, swap: false, octave: 0, pattern: 'manual', bpm: 100, vel: 1.0, chord: null, arp: 'updown', bass: 'alt', strum: 'folk' };
 const voicing = () => INSTRUMENTS[instId].voicing;
@@ -344,7 +356,7 @@ function renderKey() {
     b.querySelector('small').textContent = buildChord(state.key, +b.dataset.deg, 0, null, state.swap, 0, 0).name;
   });
 }
-function setKey(k) { state.key = (k + 12) % 12; arpReset(); renderKey(); updateChord(); }
+function setKey(k) { state.key = (k + 12) % 12; arpReset(); renderKey(); updateChord(); savePref('key', state.key); }
 function setPattern(id) {
   state.pattern = id;
   document.querySelectorAll('.pat').forEach(p => p.classList.toggle('active', p.dataset.pat === id));
@@ -371,11 +383,11 @@ function setDeg(d) {
   document.querySelectorAll('.deg[data-deg]').forEach(b => b.classList.toggle('on', +b.dataset.deg === d));
   updateChord();
 }
-function setBpm(b) { state.bpm = b; document.getElementById('nowBpm').textContent = '♩=' + b; document.getElementById('bpmSl').value = b; }
-function setArp(id) { state.arp = id; document.getElementById('arpSel').value = id; }
-function setBass(id) { state.bass = id; document.getElementById('bassSel').value = id; }
-function setStrum(id) { state.strum = id; document.getElementById('strumSel').value = id; }
-function setOctave(o) { state.octave = o; document.getElementById('octSel').value = o; updateChord(); }
+function setBpm(b) { state.bpm = b; document.getElementById('nowBpm').textContent = '♩=' + b; document.getElementById('bpmSl').value = b; savePref('bpm', b); }
+function setArp(id) { state.arp = id; document.getElementById('arpSel').value = id; savePref('arp', id); }
+function setBass(id) { state.bass = id; document.getElementById('bassSel').value = id; savePref('bass', id); }
+function setStrum(id) { state.strum = id; document.getElementById('strumSel').value = id; savePref('strum', id); }
+function setOctave(o) { state.octave = o; document.getElementById('octSel').value = o; updateChord(); savePref('octave', o); }
 
 // ---------- 手弾きアルペジオ (本家 arpeggiator.gd + coroutine_play の移植) ----------
 // パターンは 6 弦 × 8 ステップ。コードボタンを「押す」「離す」たびに 1 ステップ進み、その列で印の付いた弦を弾く
@@ -428,7 +440,7 @@ function releaseDeg(deg) {
 }
 // アルペジオ選択 (本家 F1〜F5)。ギター系は 0〜4、ピアノ系は 5〜9
 function setArpSet(v) { arpEng.set = v === VOICING.GUITAR ? 0 : 5; arpEng.cur = arpEng.set + (arpEng.cur % 5); arpReset(); renderArps(); }
-function changeArp(no) { arpEng.cur = arpEng.set + no; arpReset(); renderArps(); }
+function changeArp(no) { arpEng.cur = arpEng.set + no; arpReset(); renderArps(); savePref('arpNo', no); }
 function renderArps() {
   const row = document.getElementById('arprow'); row.innerHTML = '';
   for (let n = 0; n < 5; n++) {
@@ -551,7 +563,12 @@ window.addEventListener('keyup', e => {
 });
 window.addEventListener('blur', () => { pressed.forEach(d => releaseDeg(d)); setSwap(false); });
 
-renderKey(); setPattern('manual'); setBpm(100); setArp('updown'); setBass('alt'); setStrum('folk'); setOctave(0); loadInstrument('guitar'); loadBass(); initMidi();
+// 保存した設定 (キー / テンポ / オクターブ / 各セレクト / 楽器 / アルペジオ番号 / MIDI ポート) で復元
+state.key = prefs.key ?? 0; renderKey(); setPattern('manual');
+setBpm(prefs.bpm ?? 100); setArp(ARPEGGIOS[prefs.arp] ? prefs.arp : 'updown'); setBass(BASSES[prefs.bass] ? prefs.bass : 'alt');
+setStrum(STRUMS[prefs.strum] ? prefs.strum : 'folk'); setOctave(prefs.octave ?? 0);
+arpEng.cur = prefs.arpNo ?? 0;
+loadInstrument(INSTRUMENTS[prefs.instrument] ? prefs.instrument : 'guitar'); loadBass(); initMidi();
 </script>
 </body>
 </html>
