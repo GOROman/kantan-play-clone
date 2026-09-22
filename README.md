@@ -13,7 +13,7 @@ Web MIDI はセキュアコンテキスト (localhost / https / file) が必要�
 
 ## 画面
 - **Key** ♭ / ♯ でキー変更 (相対マイナー併記)
-- **楽器**: Ac.Guitar / Piano / E.Piano / Strings / Organ / Brass (soundfont-player の FluidR3_GM)。名前をクリックで順送り
+- **楽器**: Ac.Guitar / Piano / E.Piano / Strings / Organ / Brass / Square Wave (GM 81) (soundfont-player の FluidR3_GM)。名前をクリックで順送り
 - **リズムパターン**: 手弾き / Ballad / 8beat / 16beat / Waltz / Bossa / Rock。手弾き以外は自動演奏 (ドラム + ベース付き)
 - **1〜7 ボタン** = キーのダイアトリックコード (本家と同じく 7 は m)。**♭ / ♯** で半音シフト (シフト中はメジャー扱い)
 - **dim / sus4 / 9 / 7 / M7** の修飾。画面のボタンはトグル、キーボードは押している間だけ
